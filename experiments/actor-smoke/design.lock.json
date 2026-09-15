@@ -1,0 +1,23 @@
+{
+  "design_hash": "75535a211474043384324c4070076c16d8171ddd540b9bcf6172df20813de177",
+  "execution_enabled": false,
+  "files": {
+    "README.md": "59e80a77afb5eb300af419f2dddc479d91bb26268cc11a42307fc19acc94d09f",
+    "development.json": "489725d3aa43022e51817d078f064aef97d09ddafa06e2673079194c7d92ec38",
+    "manifest.pending.yaml": "41bdd963609c99aebf95017743de3d45d8394007fb2610a96e6d370bc5c6cfd7",
+    "model-limits.json": "bdc7165b351fbe65a654f5ec360f626ba4687fbfe586d2678190ee1ea37e7d0a"
+  },
+  "limits": {
+    "authorized_paid_spend_usd": 0,
+    "model_calls": 48,
+    "native_prefixes": 1,
+    "reserved_model_tokens": 798720,
+    "suffix_episodes": 6
+  },
+  "model_binding": null,
+  "research_claims": "NOT_ESTABLISHED",
+  "schema_version": "1",
+  "source_code_hash": "d537d32c6c29804d4b7957b5fc9e7162d9ba0765e4fe3399f1c8bc6a2599c88d",
+  "split": "development",
+  "status": "DESIGN_LOCKED_MODEL_UNSELECTED"
+}

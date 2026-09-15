@@ -1,0 +1,153 @@
+{
+  "archive_hash": "beb52c92b500f372238ce3eb0d398795141ed5994bd4522426e981d37494f7b5",
+  "generator_seed": 7,
+  "schema_version": "0.1",
+  "split_unit": "protocol_topology",
+  "splits": {
+    "development": [
+      {
+        "alias_pairs": [
+          {
+            "left": [],
+            "right": [
+              "SUBMIT_A"
+            ],
+            "suffix": [
+              "SIGNAL_Y",
+              "TICK",
+              "TICK",
+              "INSPECT"
+            ]
+          },
+          {
+            "left": [],
+            "right": [
+              "SUBMIT_B"
+            ],
+            "suffix": [
+              "SIGNAL_Y",
+              "TICK",
+              "TICK",
+              "INSPECT"
+            ]
+          },
+          {
+            "left": [],
+            "right": [
+              "SUBMIT_A",
+              "SIGNAL_Y"
+            ],
+            "suffix": [
+              "TICK",
+              "TICK",
+              "INSPECT"
+            ]
+          },
+          {
+            "left": [],
+            "right": [
+              "SUBMIT_B",
+              "SIGNAL_Y"
+            ],
+            "suffix": [
+              "TICK",
+              "TICK",
+              "INSPECT"
+            ]
+          },
+          {
+            "left": [],
+            "right": [
+              "SUBMIT_A",
+              "SIGNAL_Y",
+              "TICK"
+            ],
+            "suffix": [
+              "TICK",
+              "INSPECT"
+            ]
+          },
+          {
+            "left": [],
+            "right": [
+              "SUBMIT_B",
+              "SIGNAL_Y",
+              "TICK"
+            ],
+            "suffix": [
+              "TICK",
+              "INSPECT"
+            ]
+          },
+          {
+            "left": [
+              "SUBMIT_A"
+            ],
+            "right": [
+              "SUBMIT_B"
+            ],
+            "suffix": [
+              "SIGNAL_Y",
+              "TICK",
+              "TICK",
+              "INSPECT"
+            ]
+          },
+          {
+            "left": [
+              "SUBMIT_A"
+            ],
+            "right": [
+              "SUBMIT_A",
+              "SIGNAL_Y"
+            ],
+            "suffix": [
+              "TICK",
+              "TICK",
+              "INSPECT"
+            ]
+          }
+        ],
+        "config": {
+          "cancel_armed": false,
+          "delay": 2,
+          "family": "delayed_completion",
+          "impossible": false,
+          "retry_resets": false,
+          "signals": [
+            "SIGNAL_Y"
+          ],
+          "status_alias": true,
+          "wrong_signal_resets": false
+        },
+        "scenario_id": "scenario-0001",
+        "seed": 7,
+        "solutions": {
+          "A": [
+            "SUBMIT_A",
+            "SIGNAL_Y",
+            "SUBMIT_A",
+            "INSPECT",
+            "SUBMIT_A",
+            "INSPECT"
+          ],
+          "B": [
+            "SUBMIT_B",
+            "SIGNAL_Y",
+            "SUBMIT_B",
+            "INSPECT",
+            "SUBMIT_A",
+            "INSPECT"
+          ]
+        },
+        "split": "development",
+        "state_count": 21,
+        "topology_hash": "02f14f6f8045c0767a0f3184522854cb6a3021d252d552c89b88d0327cdd7ccc"
+      }
+    ],
+    "sealed_composition": [],
+    "sealed_familiar_size": [],
+    "sealed_larger": [],
+    "validation": []
+  }
+}

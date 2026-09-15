@@ -18,6 +18,7 @@ from protocollab.evaluation.replay import replay_run
 from protocollab.storage import Store
 
 FILES = ("episode.json", "metrics.json", "report.md", "report.json", "metrics.jsonl",
+         "study-plan.json",
          "experiment.lock.json", "scenario_archive.json", "keys/root-manifest.json",
          "owner/owner.sqlite", "private/world.sqlite", "monitor/monitor.sqlite",
          "public/journal.jsonl")

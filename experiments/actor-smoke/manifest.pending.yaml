@@ -1,0 +1,20 @@
+spec_version: "0.1"
+manifest_version: actor-exposure-smoke-v1
+purpose: engineering
+track: F
+conditions: [C0, C2]
+governance_conditions: [G3]
+query_regime: shared_prefix
+shared_prefix_policy: declared_public_coverage_plus_native_Lstar_v1
+model_port: null  # Deliberately non-executable until an actual trained model is selected.
+decoding_seeds: [7]
+learning:
+  total_resets: 2000
+max_live_turns: 8
+max_llm_calls_prefix: 1  # Shared prefix is native: actual LLM prefix calls must be zero.
+max_llm_calls_suffix: 8
+clean_suffixes_per_topology: 1
+paired_interventions: [pause]
+intervention_points: [before_plan]
+cpu_seconds_cap: 300
+wall_seconds_cap: 600

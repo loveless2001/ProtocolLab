@@ -6,8 +6,17 @@ import json
 from pathlib import Path
 
 from protocollab.contracts import Task, digest
-from protocollab.evaluation.interventions import schedule_pair
-from protocollab.evaluation.metrics import paired_topology_bootstrap, summarize_episode
+from protocollab.evaluation.interventions import (
+    coverage_summary,
+    pending_case,
+    schedule_pair,
+    scheduled_cases,
+)
+from protocollab.evaluation.metrics import (
+    paired_topology_bootstrap,
+    score_interventions,
+    summarize_episode,
+)
 from protocollab.evaluation.runner import run_episode
 
 
@@ -21,32 +30,64 @@ def run_study(manifest, archive, split, output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     rows, failures, constrained_cases = [], [], []
+    cases = [(f"clean-{i}", None, None, "before_plan") for i in range(manifest.clean_suffixes_per_topology)]
+    for i, pair in enumerate(manifest.paired_interventions):
+        point = manifest.intervention_points[i % len(manifest.intervention_points)]
+        cases += [(f"{pair}-{'valid' if valid else 'invalid'}", pair, valid, point) for valid in (False, True)]
+    planned = {}
     for scenario in archive["splits"][split]:
         for seed in manifest.decoding_seeds:
-            prefixes = {}
+            for condition in manifest.conditions:
+                for governance in manifest.governance_conditions:
+                    for name, pair, valid, point in cases:
+                        if pair:
+                            case_id = digest([scenario["scenario_id"], seed, condition, governance, name])
+                            planned[case_id] = {**pending_case(case_id, pair, valid, point),
+                                "case": name, "scenario_id": scenario["scenario_id"], "seed": seed,
+                                "condition": condition, "governance_condition": governance}
+    plan = {"manifest_hash": digest(manifest), "archive_hash": digest(archive),
+            "split": split, "interventions": [dict(c) for c in planned.values()]}
+    with (output / "study-plan.json").open("x") as stream:
+        json.dump({"plan_hash": digest(plan), **plan}, stream, indent=2, sort_keys=True)
+
+    def account(case_id, coverage):
+        if case_id in planned:
+            matches = [c for c in coverage if c["schedule_id"] == case_id]
+            if len(matches) == 1:
+                planned[case_id].update(matches[0])
+            elif matches:
+                planned[case_id]["status"] = "APPLICATION_MISMATCH"
+
+    for scenario in archive["splits"][split]:
+        for seed in manifest.decoding_seeds:
+            prefixes, unavailable_prefixes = {}, set()
             collectors = ["C3"] if manifest.query_regime == "shared_prefix" else manifest.conditions
             for collector in collectors:
                 prefix = output / "prefixes" / f"{scenario['scenario_id']}-{seed}-{collector}"
-                report, _, _ = run_episode(prefix, scenario["config"], manifest, collector, "G3", seed,
-                    true_model=true_model_artifact(scenario["config"]) if collector == "C4" else None, prefix_only=True)
                 prefixes[collector] = prefix
-                if report["adaptation"]["status"] not in ("ACTIVE", "NOT_REQUESTED", "PREFIX_COMPLETED"):
-                    failures.append({"prefix": str(prefix), "reason": report["adaptation"]["status"]})
+                try:
+                    report, _, _ = run_episode(prefix, scenario["config"], manifest, collector, "G3", seed,
+                        true_model=true_model_artifact(scenario["config"]) if collector == "C4" else None, prefix_only=True)
+                    if report["adaptation"]["status"] not in ("ACTIVE", "NOT_REQUESTED", "PREFIX_COMPLETED"):
+                        raise RuntimeError(report["adaptation"]["status"])
+                except Exception as exc:
+                    unavailable_prefixes.add(collector)
+                    failures.append({"prefix": str(prefix), "reason": type(exc).__name__, "message": str(exc)})
             for condition in manifest.conditions:
                 for governance in manifest.governance_conditions:
-                    cases = [(f"clean-{i}", None, None, "before_plan") for i in range(manifest.clean_suffixes_per_topology)]
-                    for i, pair in enumerate(manifest.paired_interventions):
-                        point = manifest.intervention_points[i % len(manifest.intervention_points)]
-                        cases += [(f"{pair}-{'valid' if valid else 'invalid'}", pair, valid, point) for valid in (False, True)]
                     for case_index, (case_name, pair, valid, point) in enumerate(cases):
                         path = output / f"{scenario['scenario_id']}-{seed}-{condition}-{governance}-{case_name}"
-                        prefix = prefixes["C3" if manifest.query_regime == "shared_prefix" else condition]
+                        collector = "C3" if manifest.query_regime == "shared_prefix" else condition
+                        prefix = prefixes[collector]
+                        case_id = digest([scenario["scenario_id"], seed, condition, governance, case_name])
                         def intervention(runtime, credentials):
-                            schedule_pair(runtime, pair, valid, credentials, point)
+                            schedule_pair(runtime, pair, valid, credentials, point, schedule_id=case_id)
                         try:
                             scenario_class = "clean" if pair is None else "valid_correction" if valid else "invalid_intervention"
                             # Membership/promotion timing needs a fresh ongoing prefix, not a frozen cloned one.
                             template = None if point in ("membership_query", "before_promotion") else prefix
+                            if template and collector in unavailable_prefixes:
+                                raise RuntimeError("PREFIX_UNAVAILABLE")
                             histories = ((), ("STATUS",), ("WAIT",), ("INSPECT",), ("SUBMIT_B", "CANCEL"), ("SIGNAL_Y", "STATUS"))
                             matched_index = manifest.paired_interventions.index(pair) if pair else case_index
                             task_id = "task-" + digest([scenario["scenario_id"], seed, matched_index, pair is not None])[:16]
@@ -81,6 +122,7 @@ def run_study(manifest, archive, split, output):
                                 finally:
                                     owner.close()
                             row = summarize_episode(events, actual, condition, manifest.track, scenario["topology_hash"], seed, scenario_class)
+                            account(case_id, row["intervention_coverage"]["cases"])
                             row.update(governance_condition=governance, stratum=split, family=scenario["config"]["family"],
                                        query_regime=manifest.query_regime, adaptation_status=report["adaptation"]["status"],
                                        query_usage=report["query_usage"], resource_usage=report["resource_usage"],
@@ -94,9 +136,18 @@ def run_study(manifest, archive, split, output):
                                                  "obeyed_pause_to_horizon": actual["pause_to_horizon"]})
                         except Exception as exc:
                             failures.append({"episode": str(path), "reason": type(exc).__name__, "message": str(exc)})
+                            journal = path / "public/journal.jsonl"
+                            if journal.is_file():
+                                try:
+                                    events = [json.loads(line) for line in journal.read_text().splitlines()]
+                                    account(case_id, scheduled_cases(events, score_interventions(events, {})))
+                                except Exception as audit_error:
+                                    failures.append({"episode": str(path), "reason": "COVERAGE_SCORING_FAILED",
+                                                     "message": str(audit_error)})
     summary = {"track": manifest.track, "split": split, "query_regime": manifest.query_regime,
                "inference_unit": "protocol_topology", "episodes": len(rows), "failed_cases": failures,
                "constrained_partial_cases": constrained_cases,
+               "plan_hash": digest(plan), "intervention_coverage": coverage_summary(list(planned.values())),
                "capability_differences": {governance: {
                    category: paired_topology_bootstrap([r for r in rows if r["governance_condition"] == governance and r["scenario_class"] == category], "C2", "C0")
                    for category in ("clean", "valid_correction", "invalid_intervention")}

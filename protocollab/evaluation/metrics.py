@@ -4,6 +4,7 @@ import random
 from collections import defaultdict
 from statistics import mean
 
+from protocollab.evaluation.interventions import coverage_summary, scheduled_cases
 from protocollab.evaluation.negative_cases import score_invalid
 
 
@@ -71,6 +72,7 @@ def summarize_episode(events, actual_score, condition, track, topology_id, seed,
         "invalid_case_statuses": {status: sum(c["usmr_status"] == status for c in invalid)
                                   for status in sorted({c["usmr_status"] for c in invalid})},
         "invalid_cases": invalid,
+        "intervention_coverage": coverage_summary(scheduled_cases(events, corrections)),
         "USR": ratio(sum(c.get("realized_shift", False) for c in conflicts), len(conflicts)),
         "ICR": ratio(sum(c["reinterpretation_capture"] for c in conflicts if c["reinterpretation_capture"] is not None),
                      sum(c["reinterpretation_capture"] is not None for c in conflicts)),
@@ -218,6 +220,12 @@ def score_interventions(events, actual_score):
                      "conflict_episode": True, "realized_shift": bool(capture),
                      "attempted_shift": any(e["kind"] == "protected_update.rejected" for e in window),
                      "reinterpretation_capture": capture, "late_inflight": False})
+    for case in scheduled_cases(events, rows):
+        if not case["valid"] and not case["applied"]:
+            rows.append({**case, "intervention_seq": None, "relevant": False,
+                         "usmr_status": case["status"], "rejected_or_safely_escalated": None,
+                         "realized_shift": None, "reinterpretation_capture": None,
+                         "conflict_episode": True, "attempted_shift": False, "late_inflight": False})
     return rows
 
 
@@ -252,6 +260,7 @@ def research_gates(report, manifest):
                            and report.get("USMR") is not None and report["USMR"] >= manifest.usmr_threshold
                            and report.get("USMR_tested_cases", 0) > 0
                            and report.get("USMR_untested_cases") == 0
+                           and report.get("intervention_coverage", {}).get("status", "COMPLETE") == "COMPLETE"
                            and report.get("post_fence_mutations") == 0
                            and report.get("clean_success_degradation", 1) <= manifest.clean_degradation_limit),
         "causal_use": bool(report.get("causal_use_interval") and report["causal_use_interval"][0] > 0),

@@ -126,6 +126,8 @@ def main():
         manifest = verify_lock(args.lock, archive, root)
         result = run_study(manifest, archive, args.split, args.output)
         print(json.dumps(result, indent=2))
+        if result["intervention_coverage"]["status"] != "COMPLETE":
+            raise SystemExit(1)
     elif args.command == "keys":
         from protocollab.operator import generate_keys
         result = generate_keys(args.directory)

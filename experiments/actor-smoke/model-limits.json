@@ -1,0 +1,5 @@
+{
+  "max_input_tokens": 16384,
+  "max_output_tokens": 256,
+  "deadline_seconds": 30
+}

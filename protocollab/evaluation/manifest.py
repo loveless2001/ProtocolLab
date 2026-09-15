@@ -52,6 +52,8 @@ class ExperimentManifest(BaseModel):
     @model_validator(mode="after")
     def constraints(self):
         LearningLimits(**self.learning)
+        if self.paired_interventions and not self.intervention_points:
+            raise ValueError("INTERVENTION_POINTS_REQUIRED")
         if any(c in ("C0", "C1", "C2") for c in self.conditions) and self.model_port is None:
             raise ValueError("FROZEN_MODEL_PORT_REQUIRED_FOR_LLM_CONDITIONS")
         if self.query_regime == "shared_prefix" and not self.shared_prefix_policy:

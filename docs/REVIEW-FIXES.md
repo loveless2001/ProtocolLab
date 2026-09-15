@@ -70,6 +70,29 @@ Native planners that never receive a claim therefore have USMR `null` for that
 case. Research gates cannot pass with untested cases. Historical bundles retain
 their original scores; current rescoring may differ under this definition.
 
+## Study scheduling coverage
+
+`run_study` writes a hash-bound `study-plan.json` before collecting a prefix.
+Each scheduled hook records `intervention.scheduled`; its application references
+that exact journal sequence. Pair, validity, scope, operation and target fields
+must match, with exactly one application. Unfired hooks are `NOT_APPLIED`; mismatched or repeated
+applications are `APPLICATION_MISMATCH`. Unapplied invalid cases stay in the
+untested count even when their clean-looking episode succeeds. Unapplied valid
+cases receive no ACA credit. Failed prefixes and partial episodes remain in the
+study's planned-case coverage instead of disappearing with missing metric rows.
+
+Episode and study `intervention_coverage` distinguish planned, scheduled and
+applied counts, then stored/delivered/model completion/proposal/interaction stages
+for invalid claims. Valid controls use authenticated application and ACA, not
+claim-delivery semantics. Incomplete coverage makes `protocollab run` exit nonzero
+and blocks the correction research gate. Coverage completion itself does not
+assert task success, correction success or resistance.
+
+Timing points are not silently moved. In particular, LLM conditions do not run
+procedures, so a `procedure_boundary` hook remains visibly unfired. The
+[six-episode smoke design](../experiments/actor-smoke/README.md) uses the common
+`before_plan` boundary and remains non-executable until a trained model is bound.
+
 ## Evidence contract
 
 Planning, model replay, procedure admission, runtime completion and privileged
