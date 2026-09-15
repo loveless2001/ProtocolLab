@@ -1,0 +1,861 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProtocolLab core design contracts v0.1",
+  "description": "Shape validation only. Authenticity, authority, semantic consistency and cross-field invariants require trusted runtime checks.",
+  "$defs": {
+    "ProtectedDependencies": {
+      "type": "object",
+      "properties": {
+        "alphabet_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "normalizer_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "operation_registry_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "governance_interface_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "task_schema_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "alphabet_hash",
+        "normalizer_hash",
+        "operation_registry_hash",
+        "governance_interface_hash",
+        "task_schema_hash"
+      ],
+      "additionalProperties": false
+    },
+    "ActionProposal": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "action.proposal"
+        },
+        "schema_version": {
+          "const": "0.1"
+        },
+        "proposal_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "command_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "resource_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "enum": [
+            "SUBMIT_A",
+            "SUBMIT_B",
+            "SIGNAL_X",
+            "SIGNAL_Y",
+            "CANCEL",
+            "STATUS",
+            "INSPECT"
+          ]
+        },
+        "actor_principal_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "belief_rev": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model_rev": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "goal_rev": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "control_epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "expected_effect_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "kind",
+        "schema_version",
+        "proposal_id",
+        "command_id",
+        "namespace",
+        "resource_id",
+        "operation",
+        "actor_principal_ref",
+        "belief_rev",
+        "model_rev",
+        "goal_rev",
+        "control_epoch",
+        "idempotency_key",
+        "expected_effect_ref"
+      ],
+      "additionalProperties": false
+    },
+    "ControlEvent": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "control.event"
+        },
+        "schema_version": {
+          "const": "0.1"
+        },
+        "event_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "issuer_principal_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "issuer_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nonce": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "scope_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "verb": {
+          "enum": [
+            "PAUSE_DISPATCH",
+            "RESUME",
+            "REVOKE",
+            "GRANT",
+            "REDIRECT",
+            "REVIEW_RESOLUTION",
+            "HOLD"
+          ]
+        },
+        "operation": {
+          "enum": [
+            "SUBMIT_A",
+            "SUBMIT_B",
+            "SIGNAL_X",
+            "SIGNAL_Y",
+            "CANCEL",
+            "STATUS",
+            "INSPECT",
+            null
+          ]
+        },
+        "artifact": {
+          "enum": [
+            "A",
+            "B",
+            null
+          ]
+        },
+        "appeal_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "resolution": {
+          "enum": [
+            "UPHOLD",
+            "LIFT",
+            "NARROW",
+            "DENY",
+            null
+          ]
+        },
+        "auth_evidence_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "kind",
+        "schema_version",
+        "event_id",
+        "issuer_principal_ref",
+        "issuer_seq",
+        "nonce",
+        "scope_ref",
+        "expected_revision",
+        "verb",
+        "operation",
+        "artifact",
+        "appeal_id",
+        "resolution",
+        "auth_evidence_ref"
+      ],
+      "additionalProperties": false
+    },
+    "ObservationRecord": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "observation.record"
+        },
+        "schema_version": {
+          "const": "0.1"
+        },
+        "observation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "resource_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_principal_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "causal_command_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "logical_tick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "raw_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "normalizer_rev": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "input_symbol": {
+          "enum": [
+            "SUBMIT_A",
+            "SUBMIT_B",
+            "SIGNAL_X",
+            "SIGNAL_Y",
+            "CANCEL",
+            "STATUS",
+            "INSPECT",
+            "TICK"
+          ]
+        },
+        "domain_output": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "note_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "loss_flags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "kind",
+        "schema_version",
+        "observation_id",
+        "namespace",
+        "resource_id",
+        "source_principal_ref",
+        "causal_command_id",
+        "seq",
+        "logical_tick",
+        "raw_hash",
+        "normalizer_rev",
+        "input_symbol",
+        "domain_output",
+        "note_ref",
+        "loss_flags"
+      ],
+      "additionalProperties": false
+    },
+    "PredictionRecord": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "prediction.record"
+        },
+        "schema_version": {
+          "const": "0.1"
+        },
+        "prediction_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "belief_rev": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model_rev": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "commit_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_symbol": {
+          "enum": [
+            "SUBMIT_A",
+            "SUBMIT_B",
+            "SIGNAL_X",
+            "SIGNAL_Y",
+            "CANCEL",
+            "STATUS",
+            "INSPECT",
+            "TICK"
+          ]
+        },
+        "status": {
+          "enum": [
+            "PREDICTED",
+            "PREDICTED_SET",
+            "UNPREDICTED"
+          ]
+        },
+        "expected_outputs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "assumption_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "kind",
+        "schema_version",
+        "prediction_id",
+        "namespace",
+        "belief_rev",
+        "model_rev",
+        "commit_seq",
+        "input_symbol",
+        "status",
+        "expected_outputs",
+        "assumption_refs"
+      ],
+      "additionalProperties": false
+    },
+    "Transition": {
+      "type": "object",
+      "properties": {
+        "from_state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "input": {
+          "enum": [
+            "SUBMIT_A",
+            "SUBMIT_B",
+            "SIGNAL_X",
+            "SIGNAL_Y",
+            "CANCEL",
+            "STATUS",
+            "INSPECT",
+            "TICK"
+          ]
+        },
+        "to_state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "output": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "from_state",
+        "input",
+        "to_state",
+        "output"
+      ],
+      "additionalProperties": false
+    },
+    "ModelArtifact": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "model.artifact"
+        },
+        "schema_version": {
+          "const": "0.1"
+        },
+        "model_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "initial_state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "states": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "alphabet": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "SUBMIT_A",
+              "SUBMIT_B",
+              "SIGNAL_X",
+              "SIGNAL_Y",
+              "CANCEL",
+              "STATUS",
+              "INSPECT",
+              "TICK"
+            ]
+          },
+          "minItems": 8,
+          "maxItems": 8,
+          "uniqueItems": true
+        },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Transition"
+          },
+          "minItems": 8,
+          "maxItems": 512
+        },
+        "training_trace_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "protected_dependencies": {
+          "$ref": "#/$defs/ProtectedDependencies"
+        },
+        "evidence_status": {
+          "enum": [
+            "DRAFT",
+            "CONSISTENT_WITH_TESTED_TRACES",
+            "QUARANTINED"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "schema_version",
+        "model_id",
+        "namespace",
+        "revision",
+        "initial_state",
+        "states",
+        "alphabet",
+        "transitions",
+        "training_trace_refs",
+        "protected_dependencies",
+        "evidence_status"
+      ],
+      "additionalProperties": false
+    },
+    "Branch": {
+      "type": "object",
+      "properties": {
+        "domain_output": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "tick_output": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "next_node": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "domain_output",
+        "tick_output",
+        "next_node"
+      ],
+      "additionalProperties": false
+    },
+    "ProcedureNode": {
+      "type": "object",
+      "properties": {
+        "node_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "node_type": {
+          "enum": [
+            "ACT",
+            "WAIT",
+            "SUCCESS",
+            "ABORT",
+            "ASK"
+          ]
+        },
+        "operation": {
+          "enum": [
+            "SUBMIT_A",
+            "SUBMIT_B",
+            "SIGNAL_X",
+            "SIGNAL_Y",
+            "CANCEL",
+            "STATUS",
+            "INSPECT",
+            null
+          ]
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Branch"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "default_next": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "node_id",
+        "node_type",
+        "operation",
+        "branches",
+        "default_next"
+      ],
+      "additionalProperties": false
+    },
+    "ProcedureArtifact": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "procedure.artifact"
+        },
+        "schema_version": {
+          "const": "0.1"
+        },
+        "procedure_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "resource_binding": {
+          "const": "task_resource"
+        },
+        "goal_artifact": {
+          "enum": [
+            "A",
+            "B"
+          ]
+        },
+        "clock_contract": {
+          "const": "live_command_then_tick/v1"
+        },
+        "entry_node": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "max_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProcedureNode"
+          },
+          "minItems": 1,
+          "maxItems": 128
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "protected_dependencies": {
+          "$ref": "#/$defs/ProtectedDependencies"
+        }
+      },
+      "required": [
+        "kind",
+        "schema_version",
+        "procedure_id",
+        "namespace",
+        "revision",
+        "model_hash",
+        "resource_binding",
+        "goal_artifact",
+        "clock_contract",
+        "entry_node",
+        "max_steps",
+        "nodes",
+        "evidence_refs",
+        "protected_dependencies"
+      ],
+      "additionalProperties": false
+    },
+    "AdmissionReport": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "admission.report"
+        },
+        "schema_version": {
+          "const": "0.1"
+        },
+        "report_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "candidate_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "gate_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "training_manifest_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "probe_manifest_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "candidate_locked_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "probe_started_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "real_probe_steps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "probe_resets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "counterexample_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "INTERRUPTED",
+            "ASSUMPTION_VIOLATION",
+            "BUDGET_EXHAUSTED"
+          ]
+        },
+        "protected_dependencies_unchanged": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "schema_version",
+        "report_id",
+        "candidate_hash",
+        "namespace",
+        "gate_version",
+        "training_manifest_hash",
+        "probe_manifest_hash",
+        "candidate_locked_seq",
+        "probe_started_seq",
+        "real_probe_steps",
+        "probe_resets",
+        "counterexample_refs",
+        "status",
+        "protected_dependencies_unchanged"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ActionProposal"
+    },
+    {
+      "$ref": "#/$defs/ControlEvent"
+    },
+    {
+      "$ref": "#/$defs/ObservationRecord"
+    },
+    {
+      "$ref": "#/$defs/PredictionRecord"
+    },
+    {
+      "$ref": "#/$defs/ModelArtifact"
+    },
+    {
+      "$ref": "#/$defs/ProcedureArtifact"
+    },
+    {
+      "$ref": "#/$defs/AdmissionReport"
+    }
+  ]
+}

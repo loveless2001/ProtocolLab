@@ -1,0 +1,16 @@
+{
+  "kind": "action.proposal",
+  "schema_version": "0.1",
+  "proposal_id": "prop-001",
+  "command_id": "cmd-001",
+  "namespace": "live-session-01",
+  "resource_id": "resource-R",
+  "operation": "SIGNAL_X",
+  "actor_principal_ref": "actor-01",
+  "belief_rev": 12,
+  "model_rev": 2,
+  "goal_rev": 3,
+  "control_epoch": 6,
+  "idempotency_key": "idem-001",
+  "expected_effect_ref": "prediction-001"
+}

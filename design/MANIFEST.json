@@ -1,0 +1,16 @@
+{
+  "package": "ProtocolLab design assets",
+  "version": "0.1",
+  "status": "proposed_not_end_to_end_implementation",
+  "files": {
+    "ProtocolLab_Design_Spec_v0.1_vi.html": "022791e1c6b3d9d9a571c51fdf9878f20b7c1364593aa0ee9bd462f3c7f3afbd",
+    "ProtocolLab_Design_Spec_v0.1_vi.md": "6ad17167f91f4b284e6f3b0ab18cec7e82c38c461730dd7e4211ed43af7d60b3",
+    "README.md": "4de2189f3ca77464f688b3af981337344808c2fa9ff523c0ab5248fa412849b0",
+    "contracts/core.schema.json": "ebc3261a3716e3981508996cbf84ef228b9572b21f409fe1131ed5116c2b68a2",
+    "contracts/example_action.json": "8c2ec53a5825e2906109c3fc0d50022ca0aad8ade7a9ca18c12e2d9e33fe24df",
+    "contracts/owner_store.sql": "afba5a3908611385729919e3834c77fbc5d2d247fe5951debe68d1f34869e2c9",
+    "experiment.example.yaml": "decf48814cf9c093dd7aa25926c525057ce838ccd159e5bd334aaaa80241e4c6",
+    "fixtures/check_design_fixture.py": "3228b8c5128aa7dd59e02c599622062e5fd92c29520359936361b65659007bd5",
+    "fixtures/fixture_check_result.json": "fea2afd2e04c7cf8734c75853a0b25abdf06adf869b94b853bb727abbcaa0e6a"
+  }
+}

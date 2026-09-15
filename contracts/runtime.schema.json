@@ -1,0 +1,1062 @@
+{
+  "spec_version": "0.1",
+  "schemas": {
+    "ActionProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "kind": {
+          "const": "action.proposal",
+          "default": "action.proposal",
+          "title": "Kind",
+          "type": "string"
+        },
+        "proposal_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "command_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Command Id",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "resource_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "operation": {
+          "enum": [
+            "SUBMIT_A",
+            "SUBMIT_B",
+            "SIGNAL_X",
+            "SIGNAL_Y",
+            "CANCEL",
+            "STATUS",
+            "INSPECT"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "actor_principal_ref": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Actor Principal Ref",
+          "type": "string"
+        },
+        "belief_rev": {
+          "minimum": 0,
+          "title": "Belief Rev",
+          "type": "integer"
+        },
+        "model_rev": {
+          "minimum": 0,
+          "title": "Model Rev",
+          "type": "integer"
+        },
+        "goal_rev": {
+          "minimum": 0,
+          "title": "Goal Rev",
+          "type": "integer"
+        },
+        "control_epoch": {
+          "minimum": 0,
+          "title": "Control Epoch",
+          "type": "integer"
+        },
+        "idempotency_key": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "expected_effect_ref": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Effect Ref"
+        }
+      },
+      "required": [
+        "proposal_id",
+        "command_id",
+        "namespace",
+        "resource_id",
+        "operation",
+        "actor_principal_ref",
+        "belief_rev",
+        "model_rev",
+        "goal_rev",
+        "control_epoch",
+        "idempotency_key"
+      ],
+      "title": "ActionProposal",
+      "type": "object"
+    },
+    "ControlEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "kind": {
+          "const": "control.event",
+          "default": "control.event",
+          "title": "Kind",
+          "type": "string"
+        },
+        "event_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Event Id",
+          "type": "string"
+        },
+        "issuer_principal_ref": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Issuer Principal Ref",
+          "type": "string"
+        },
+        "issuer_seq": {
+          "minimum": 0,
+          "title": "Issuer Seq",
+          "type": "integer"
+        },
+        "nonce": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "scope_ref": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Scope Ref",
+          "type": "string"
+        },
+        "expected_revision": {
+          "minimum": 0,
+          "title": "Expected Revision",
+          "type": "integer"
+        },
+        "verb": {
+          "enum": [
+            "PAUSE_DISPATCH",
+            "RESUME",
+            "REVOKE",
+            "GRANT",
+            "REDIRECT",
+            "REVIEW_RESOLUTION",
+            "HOLD"
+          ],
+          "title": "Verb",
+          "type": "string"
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "enum": [
+                "SUBMIT_A",
+                "SUBMIT_B",
+                "SIGNAL_X",
+                "SIGNAL_Y",
+                "CANCEL",
+                "STATUS",
+                "INSPECT"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Operation"
+        },
+        "artifact": {
+          "anyOf": [
+            {
+              "enum": [
+                "A",
+                "B"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact"
+        },
+        "appeal_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Appeal Id"
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "enum": [
+                "UPHOLD",
+                "LIFT",
+                "NARROW",
+                "DENY"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolution"
+        },
+        "auth_evidence_ref": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Auth Evidence Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "issuer_principal_ref",
+        "issuer_seq",
+        "nonce",
+        "scope_ref",
+        "expected_revision",
+        "verb",
+        "auth_evidence_ref"
+      ],
+      "title": "ControlEvent",
+      "type": "object"
+    },
+    "ObservationRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "kind": {
+          "const": "observation.record",
+          "default": "observation.record",
+          "title": "Kind",
+          "type": "string"
+        },
+        "observation_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Observation Id",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "resource_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "source_principal_ref": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Source Principal Ref",
+          "type": "string"
+        },
+        "causal_command_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Causal Command Id"
+        },
+        "seq": {
+          "minimum": 0,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "logical_tick": {
+          "minimum": 0,
+          "title": "Logical Tick",
+          "type": "integer"
+        },
+        "raw_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Raw Hash",
+          "type": "string"
+        },
+        "normalizer_rev": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Normalizer Rev",
+          "type": "string"
+        },
+        "input_symbol": {
+          "enum": [
+            "SUBMIT_A",
+            "SUBMIT_B",
+            "SIGNAL_X",
+            "SIGNAL_Y",
+            "CANCEL",
+            "STATUS",
+            "INSPECT",
+            "TICK"
+          ],
+          "title": "Input Symbol",
+          "type": "string"
+        },
+        "domain_output": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Domain Output",
+          "type": "string"
+        },
+        "note_ref": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note Ref"
+        },
+        "loss_flags": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Loss Flags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "observation_id",
+        "namespace",
+        "resource_id",
+        "source_principal_ref",
+        "causal_command_id",
+        "seq",
+        "logical_tick",
+        "raw_hash",
+        "normalizer_rev",
+        "input_symbol",
+        "domain_output"
+      ],
+      "title": "ObservationRecord",
+      "type": "object"
+    },
+    "PredictionRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "kind": {
+          "const": "prediction.record",
+          "default": "prediction.record",
+          "title": "Kind",
+          "type": "string"
+        },
+        "prediction_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Prediction Id",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "belief_rev": {
+          "minimum": 0,
+          "title": "Belief Rev",
+          "type": "integer"
+        },
+        "model_rev": {
+          "minimum": 0,
+          "title": "Model Rev",
+          "type": "integer"
+        },
+        "commit_seq": {
+          "minimum": 0,
+          "title": "Commit Seq",
+          "type": "integer"
+        },
+        "input_symbol": {
+          "enum": [
+            "SUBMIT_A",
+            "SUBMIT_B",
+            "SIGNAL_X",
+            "SIGNAL_Y",
+            "CANCEL",
+            "STATUS",
+            "INSPECT",
+            "TICK"
+          ],
+          "title": "Input Symbol",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "PREDICTED",
+            "PREDICTED_SET",
+            "UNPREDICTED"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "expected_outputs": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Expected Outputs",
+          "type": "array"
+        },
+        "assumption_refs": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Assumption Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "prediction_id",
+        "namespace",
+        "belief_rev",
+        "model_rev",
+        "commit_seq",
+        "input_symbol",
+        "status",
+        "expected_outputs"
+      ],
+      "title": "PredictionRecord",
+      "type": "object"
+    },
+    "ModelArtifact": {
+      "$defs": {
+        "ProtectedDependencies": {
+          "additionalProperties": false,
+          "properties": {
+            "alphabet_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Alphabet Hash",
+              "type": "string"
+            },
+            "normalizer_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Normalizer Hash",
+              "type": "string"
+            },
+            "operation_registry_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Operation Registry Hash",
+              "type": "string"
+            },
+            "governance_interface_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Governance Interface Hash",
+              "type": "string"
+            },
+            "task_schema_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Task Schema Hash",
+              "type": "string"
+            }
+          },
+          "required": [
+            "alphabet_hash",
+            "normalizer_hash",
+            "operation_registry_hash",
+            "governance_interface_hash",
+            "task_schema_hash"
+          ],
+          "title": "ProtectedDependencies",
+          "type": "object"
+        },
+        "Transition": {
+          "additionalProperties": false,
+          "properties": {
+            "from_state": {
+              "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+              "title": "From State",
+              "type": "string"
+            },
+            "input": {
+              "enum": [
+                "SUBMIT_A",
+                "SUBMIT_B",
+                "SIGNAL_X",
+                "SIGNAL_Y",
+                "CANCEL",
+                "STATUS",
+                "INSPECT",
+                "TICK"
+              ],
+              "title": "Input",
+              "type": "string"
+            },
+            "to_state": {
+              "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+              "title": "To State",
+              "type": "string"
+            },
+            "output": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Output",
+              "type": "string"
+            }
+          },
+          "required": [
+            "from_state",
+            "input",
+            "to_state",
+            "output"
+          ],
+          "title": "Transition",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "kind": {
+          "const": "model.artifact",
+          "default": "model.artifact",
+          "title": "Kind",
+          "type": "string"
+        },
+        "model_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "initial_state": {
+          "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+          "title": "Initial State",
+          "type": "string"
+        },
+        "states": {
+          "items": {
+            "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "States",
+          "type": "array"
+        },
+        "alphabet": {
+          "items": {
+            "enum": [
+              "SUBMIT_A",
+              "SUBMIT_B",
+              "SIGNAL_X",
+              "SIGNAL_Y",
+              "CANCEL",
+              "STATUS",
+              "INSPECT",
+              "TICK"
+            ],
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 8,
+          "title": "Alphabet",
+          "type": "array"
+        },
+        "transitions": {
+          "items": {
+            "$ref": "#/$defs/Transition"
+          },
+          "maxItems": 512,
+          "minItems": 8,
+          "title": "Transitions",
+          "type": "array"
+        },
+        "training_trace_refs": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 4096,
+          "title": "Training Trace Refs",
+          "type": "array"
+        },
+        "protected_dependencies": {
+          "$ref": "#/$defs/ProtectedDependencies"
+        },
+        "evidence_status": {
+          "default": "DRAFT",
+          "enum": [
+            "DRAFT",
+            "CONSISTENT_WITH_TESTED_TRACES",
+            "QUARANTINED"
+          ],
+          "title": "Evidence Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_id",
+        "namespace",
+        "revision",
+        "initial_state",
+        "states",
+        "alphabet",
+        "transitions",
+        "protected_dependencies"
+      ],
+      "title": "ModelArtifact",
+      "type": "object"
+    },
+    "ProcedureArtifact": {
+      "$defs": {
+        "Branch": {
+          "additionalProperties": false,
+          "properties": {
+            "domain_output": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain Output"
+            },
+            "tick_output": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Tick Output",
+              "type": "string"
+            },
+            "next_node": {
+              "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+              "title": "Next Node",
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain_output",
+            "tick_output",
+            "next_node"
+          ],
+          "title": "Branch",
+          "type": "object"
+        },
+        "ProcedureNode": {
+          "additionalProperties": false,
+          "properties": {
+            "node_id": {
+              "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+              "title": "Node Id",
+              "type": "string"
+            },
+            "node_type": {
+              "enum": [
+                "ACT",
+                "WAIT",
+                "SUCCESS",
+                "ABORT",
+                "ASK"
+              ],
+              "title": "Node Type",
+              "type": "string"
+            },
+            "operation": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "SUBMIT_A",
+                    "SUBMIT_B",
+                    "SIGNAL_X",
+                    "SIGNAL_Y",
+                    "CANCEL",
+                    "STATUS",
+                    "INSPECT"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Operation"
+            },
+            "branches": {
+              "items": {
+                "$ref": "#/$defs/Branch"
+              },
+              "maxItems": 128,
+              "title": "Branches",
+              "type": "array"
+            },
+            "default_next": {
+              "anyOf": [
+                {
+                  "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Default Next"
+            }
+          },
+          "required": [
+            "node_id",
+            "node_type"
+          ],
+          "title": "ProcedureNode",
+          "type": "object"
+        },
+        "ProtectedDependencies": {
+          "additionalProperties": false,
+          "properties": {
+            "alphabet_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Alphabet Hash",
+              "type": "string"
+            },
+            "normalizer_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Normalizer Hash",
+              "type": "string"
+            },
+            "operation_registry_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Operation Registry Hash",
+              "type": "string"
+            },
+            "governance_interface_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Governance Interface Hash",
+              "type": "string"
+            },
+            "task_schema_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Task Schema Hash",
+              "type": "string"
+            }
+          },
+          "required": [
+            "alphabet_hash",
+            "normalizer_hash",
+            "operation_registry_hash",
+            "governance_interface_hash",
+            "task_schema_hash"
+          ],
+          "title": "ProtectedDependencies",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "kind": {
+          "const": "procedure.artifact",
+          "default": "procedure.artifact",
+          "title": "Kind",
+          "type": "string"
+        },
+        "procedure_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Procedure Id",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "model_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Model Hash",
+          "type": "string"
+        },
+        "resource_binding": {
+          "const": "task_resource",
+          "default": "task_resource",
+          "title": "Resource Binding",
+          "type": "string"
+        },
+        "goal_artifact": {
+          "enum": [
+            "A",
+            "B"
+          ],
+          "title": "Goal Artifact",
+          "type": "string"
+        },
+        "clock_contract": {
+          "const": "live_command_then_tick/v1",
+          "default": "live_command_then_tick/v1",
+          "title": "Clock Contract",
+          "type": "string"
+        },
+        "entry_node": {
+          "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+          "title": "Entry Node",
+          "type": "string"
+        },
+        "max_steps": {
+          "maximum": 32,
+          "minimum": 1,
+          "title": "Max Steps",
+          "type": "integer"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/ProcedureNode"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "evidence_refs": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 4096,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "protected_dependencies": {
+          "$ref": "#/$defs/ProtectedDependencies"
+        }
+      },
+      "required": [
+        "procedure_id",
+        "namespace",
+        "revision",
+        "model_hash",
+        "goal_artifact",
+        "entry_node",
+        "max_steps",
+        "nodes",
+        "protected_dependencies"
+      ],
+      "title": "ProcedureArtifact",
+      "type": "object"
+    },
+    "AdmissionReport": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "kind": {
+          "const": "admission.report",
+          "default": "admission.report",
+          "title": "Kind",
+          "type": "string"
+        },
+        "report_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Report Id",
+          "type": "string"
+        },
+        "candidate_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Candidate Hash",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "gate_version": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Gate Version",
+          "type": "string"
+        },
+        "training_manifest_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Training Manifest Hash",
+          "type": "string"
+        },
+        "probe_manifest_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Probe Manifest Hash",
+          "type": "string"
+        },
+        "candidate_locked_seq": {
+          "minimum": 0,
+          "title": "Candidate Locked Seq",
+          "type": "integer"
+        },
+        "probe_started_seq": {
+          "minimum": 0,
+          "title": "Probe Started Seq",
+          "type": "integer"
+        },
+        "real_probe_steps": {
+          "minimum": 0,
+          "title": "Real Probe Steps",
+          "type": "integer"
+        },
+        "probe_resets": {
+          "minimum": 0,
+          "title": "Probe Resets",
+          "type": "integer"
+        },
+        "counterexample_refs": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 4096,
+          "title": "Counterexample Refs",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "INTERRUPTED",
+            "ASSUMPTION_VIOLATION",
+            "BUDGET_EXHAUSTED"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "protected_dependencies_unchanged": {
+          "title": "Protected Dependencies Unchanged",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "report_id",
+        "candidate_hash",
+        "namespace",
+        "gate_version",
+        "training_manifest_hash",
+        "probe_manifest_hash",
+        "candidate_locked_seq",
+        "probe_started_seq",
+        "real_probe_steps",
+        "probe_resets",
+        "status",
+        "protected_dependencies_unchanged"
+      ],
+      "title": "AdmissionReport",
+      "type": "object"
+    }
+  }
+}

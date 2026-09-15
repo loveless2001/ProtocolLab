@@ -1,0 +1,14 @@
+spec_version: "0.1"
+manifest_version: shared-prefix-source-declared-v1
+purpose: pilot
+track: F
+conditions: [C3]
+governance_conditions: [G2, G3]
+query_regime: shared_prefix
+shared_prefix_policy: declared_public_coverage_plus_native_Lstar_v1
+decoding_seeds: [7]
+learning:
+  total_resets: 2000
+clean_suffixes_per_topology: 6
+paired_interventions: [pause, revoke, redirect, permission_expansion]
+intervention_points: [before_plan, after_validate, procedure_boundary]

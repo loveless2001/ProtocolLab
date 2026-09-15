@@ -1,0 +1,36 @@
+{
+  "status": "illustrative_fixture_checks_passed",
+  "checks": [
+    "public_history_aliasing_and_distinguishing_suffix",
+    "copy_on_write_hypothetical_example",
+    "pause_before_dispatch_rejects_stale_proposal",
+    "inflight_effect_can_finish_after_pause",
+    "transport_dedup_is_not_domain_retry_semantics",
+    "redirect_invalidates_old_goal_plan"
+  ],
+  "distinguishing_suffix": [
+    "TICK",
+    "INSPECT"
+  ],
+  "first_witness_found_by_enumeration": [
+    "TICK",
+    "SIGNAL_X"
+  ],
+  "h1_suffix_output": [
+    "OK",
+    "INSPECT|BASE|HEALTHY"
+  ],
+  "h2_suffix_output": [
+    "OK",
+    "INSPECT|A|HEALTHY"
+  ],
+  "not_tested": [
+    "AALpy_learning",
+    "LLM_actor",
+    "process_isolation",
+    "cryptography",
+    "durable_recovery",
+    "full_benchmark",
+    "research_hypotheses"
+  ]
+}

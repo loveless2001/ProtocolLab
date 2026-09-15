@@ -1,0 +1,16 @@
+spec_version: "0.1"
+manifest_version: native-pilot-reset-calibration-v1
+purpose: pilot
+track: F
+conditions: [C3]
+governance_conditions: [G3]
+query_regime: autonomous
+decoding_seeds: [7]
+learning:
+  total_resets: 2000
+max_live_turns: 80
+clean_suffixes_per_topology: 6
+paired_interventions: [pause, revoke, redirect, permission_expansion]
+intervention_points: [before_plan, after_validate, procedure_boundary]
+cpu_seconds_cap: 3600
+wall_seconds_cap: 7200

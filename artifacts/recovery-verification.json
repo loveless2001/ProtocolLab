@@ -1,0 +1,15 @@
+{
+  "status": "PASS",
+  "before": {
+    "world_hash": "bd1b6c1448386b0606154e3449b36ab48128b6d647f010253d701bc040a01603",
+    "backend_commands": 11425
+  },
+  "after": {
+    "world_hash": "bd1b6c1448386b0606154e3449b36ab48128b6d647f010253d701bc040a01603",
+    "backend_commands": 11425
+  },
+  "recovery": {
+    "status": "RECOVERED",
+    "epoch": 1
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "acceptance": {
+    "passed": 42,
+    "results": {
+      "B01": true,
+      "B02": true,
+      "B03": true,
+      "B04": true,
+      "B05": true,
+      "E01": true,
+      "E02": true,
+      "E03": true,
+      "E04": true,
+      "E05": true,
+      "G01": true,
+      "G02": true,
+      "G03": true,
+      "G04": true,
+      "G05": true,
+      "G06": true,
+      "G07": true,
+      "G08": true,
+      "G09": true,
+      "G10": true,
+      "G11": true,
+      "L01": true,
+      "L02": true,
+      "L03": true,
+      "L04": true,
+      "L05": true,
+      "L06": true,
+      "L07": true,
+      "M01": true,
+      "M02": true,
+      "M03": true,
+      "O01": true,
+      "O02": true,
+      "O03": true,
+      "P01": true,
+      "P02": true,
+      "P03": true,
+      "P04": true,
+      "R01": true,
+      "R02": true,
+      "R03": true,
+      "R04": true
+    },
+    "scope": "Engineering acceptance matrix. Does not establish H1-H5 research gates.",
+    "spec_acceptance_ids": 42,
+    "status": "PASS"
+  },
+  "code_hash": "222b91c2623bfeb8a821c7f893bee94342547cb6bf4a7d21fbd1d2265fac3f8c",
+  "date": "2026-09-15",
+  "dependencies": {
+    "aalpy": "1.5.2",
+    "cryptography": "46.0.5",
+    "pydantic": "2.12.5",
+    "pytest": "9.0.2",
+    "torch": "2.9.1+cpu",
+    "transformers": "4.57.3"
+  },
+  "native_replay": {
+    "journal_anchor": [
+      41453,
+      "b050c2d682812669fbb504c6f17af2ba750b064d1d3c1ae4a9ca92c3628b4505"
+    ],
+    "limitations": "Replay consistency, not proof of untested dynamics or an independent experiment.",
+    "model_hash": "3bdb1bac9d4b355f57bb1923b4970b397fbff6bc0823154347ed949abc8962b4",
+    "model_matches_retained_live_trace": true,
+    "status": "REPLAYED",
+    "transitions": 10,
+    "world_actions_performed": 0
+  },
+  "native_run": "runs/final-smoke",
+  "native_verify": {
+    "artifacts": 9918,
+    "journal_anchor": [
+      41453,
+      "b050c2d682812669fbb504c6f17af2ba750b064d1d3c1ae4a9ca92c3628b4505"
+    ],
+    "status": "VERIFIED"
+  },
+  "paired_harness": "runs/final-harness-smoke/report.json",
+  "python": "3.12.3",
+  "recovery": {
+    "after": {
+      "backend_commands": 11425,
+      "world_hash": "bd1b6c1448386b0606154e3449b36ab48128b6d647f010253d701bc040a01603"
+    },
+    "before": {
+      "backend_commands": 11425,
+      "world_hash": "bd1b6c1448386b0606154e3449b36ab48128b6d647f010253d701bc040a01603"
+    },
+    "recovery": {
+      "epoch": 1,
+      "status": "RECOVERED"
+    },
+    "status": "PASS"
+  },
+  "research_verdict": "NOT_ESTABLISHED",
+  "suite": {
+    "errors": "0",
+    "failures": "0",
+    "hostname": "LAPTOP-JLT9RUVS",
+    "name": "pytest",
+    "skipped": "0",
+    "tests": "49",
+    "time": "394.227",
+    "timestamp": "2026-09-15T04:10:03.363822+07:00"
+  }
+}

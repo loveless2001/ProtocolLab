@@ -1,0 +1,21 @@
+{
+  "spec_version": "0.1",
+  "supplied_prior": [
+    "finite deterministic resettable Mealy family",
+    "fixed public alphabet and finite output schema",
+    "complete disposable-replica reset contract",
+    "replica/live dynamics equivalence within a namespace",
+    "live command-or-WAIT followed by exactly one TICK",
+    "INSPECT is an authenticated public effect sensor",
+    "trusted conservative operation classes and canonical resource binding",
+    "fixed AALpy Lstar prefix/consistency algorithm",
+    "fixed bounded planner and procedure interpreter",
+    "public coverage policy tests command pairs, clock events and INSPECT",
+    "root task policy and delegated authority are not learned"
+  ],
+  "learned_persistent": ["Mealy states and transition outputs", "distinguishing suffixes", "admitted procedures"],
+  "activation_transient": ["possible model states", "current plan", "hypothetical branches"],
+  "evidence_uncertainty": ["model mismatch", "state unresolved", "conflicting claims", "finite probe coverage"],
+  "private_environment": ["protocol configuration", "pending work", "hidden counters", "scoring labels", "solvability witnesses"],
+  "not_implemented_as_v01": ["neural bridge training", "online base-weight updates", "probabilistic model-family expansion"]
+}
