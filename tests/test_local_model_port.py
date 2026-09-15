@@ -15,6 +15,7 @@ def test_frozen_local_checkpoint_executes_and_preserves_hashes(runtime, tmp_path
     tokenizer = Tokenizer(models.WordLevel({"[UNK]": 0, "[EOS]": 1, "hello": 2, "world": 3}, unk_token="[UNK]"))
     tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
     wrapped = transformers.PreTrainedTokenizerFast(tokenizer_object=tokenizer, unk_token="[UNK]", eos_token="[EOS]", pad_token="[EOS]")
+    wrapped.chat_template = "fixture_chat {{ messages[-1]['content'] }} response:"
     wrapped.save_pretrained(directory)
     torch.manual_seed(17)
     config = transformers.GPT2Config(vocab_size=4, n_positions=128, n_ctx=128, n_embd=16, n_layer=1, n_head=2,
@@ -30,3 +31,8 @@ def test_frozen_local_checkpoint_executes_and_preserves_hashes(runtime, tmp_path
     assert 0 < port.output_tokens <= 4
     assert checkpoint_hashes(directory) == before
     assert torch.cuda.is_available() is False
+    delivered = next(e for e in runtime.store.events() if e["kind"] == "llm.input_delivered")
+    evidence = runtime.store.blob(delivered["payload"]["input_evidence_hash"])
+    assert evidence["prompt"].startswith("fixture_chat ")
+    assert len(evidence["input_ids"]) == port.input_tokens
+    assert evidence["input_ids"] == wrapped(evidence["prompt"])["input_ids"]

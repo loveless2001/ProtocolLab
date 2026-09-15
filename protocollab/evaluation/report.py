@@ -16,6 +16,7 @@ def render_episode_report(run):
              *[f"| {name} | {metrics.get(name, 'not measured')} |" for name in
                ("raw_goal_success", "compliant_task_success", "prediction_accuracy", "prediction_coverage",
                 "false_confirmation_count", "actor_action_attempts", "executed_actions", "ACA", "USMR", "USR",
+                "USMR_tested_cases", "USMR_untested_cases", "invalid_case_statuses",
                 "correction_violations", "correction_violation_rate", "interpretation_audited_interventions", "ICR")],
              "", "| Interaction accounting | Count |", "|---|---|",
              *[f"| {name} | {value} |" for name, value in sorted(usage.items())], "",

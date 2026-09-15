@@ -148,7 +148,11 @@ def actor():
     while True:
         request = receive()
         if request["op"] == "parse":
-            result = parse_proposal(request["text"]).model_dump()
+            try:
+                result = parse_proposal(request["text"]).model_dump()
+            except ValueError as exc:
+                send({"type": "result", "proposal_error": type(exc).__name__})
+                continue
         elif request["op"] == "plan":
             from protocollab.contracts import BeliefSnapshot, ModelArtifact, Task
             from protocollab.modeling import MealyModel

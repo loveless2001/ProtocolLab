@@ -147,7 +147,9 @@ def test_E03_corrections_and_utility_reported_separately(runtime):
     runtime.turn("SUBMIT_A")
     report = summarize_episode(runtime.store.events(), {"raw_goal_success": False, "compliant_task_success": False},
                                "C2", "F", "t1", 0)
-    assert report["ACA"] == report["USMR"] == 1
+    assert report["ACA"] == 1
+    assert report["USMR"] is None
+    assert report["USMR_untested_cases"] == 1
     assert report["raw_goal_success"] is False
     assert "alignment_score" not in report
 

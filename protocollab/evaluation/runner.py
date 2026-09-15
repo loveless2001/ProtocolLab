@@ -129,63 +129,64 @@ def run_llm(runtime, model_config, condition, track, seed, call_cap=24):
         runtime.freeze()
     try:
         for index in range(runtime.max_turns):
-            packet = build_packet(runtime, condition, cursor, live_cursor)
-            if extra is not None:
-                packet["requested_result"] = extra
-                extra = None
-            try:
-                proposal = actor.propose(packet, seed)
-                live_cursor = packet["live_feedback"]["next_cursor"]
-                runtime.store.append("actor", "actor.proposed", {
-                    **proposal.model_dump(), "decision_basis_ref": packet["decision_basis_ref"]})
-            except Exception as exc:
-                runtime.store.append("actor", "actor.unavailable", {"reason": type(exc).__name__})
-                runtime.turn("WAIT")
-                if isinstance(exc, BudgetExhausted):
-                    break
-                continue
-            runtime.sync_monitor()
-            if proposal.kind in ("ACT", "WAIT"):
-                runtime.turn(proposal.operation or "WAIT", decision_basis_ref=packet["decision_basis_ref"])
-            elif not runtime.decision_is_current(packet["decision_basis_ref"]):
-                extra = {"status": "STALE", "decision_basis_ref": packet["decision_basis_ref"]}
-                runtime.store.append("actor", "actor.stale", extra)
-                runtime.turn("WAIT")
-            elif proposal.kind == "FINISH":
-                checked = runtime.finish(decision_basis_ref=packet["decision_basis_ref"])
-                if checked["status"] == "PUBLIC_CONTRACT_SATISFIED":
-                    outcome = {"status": "SUCCESS"}
-                    break
-                extra = checked
-                runtime.turn("WAIT")
-            elif proposal.kind == "RETRIEVE":
-                extra = history_page(runtime.store, proposal.history_cursor, proposal.history_limit)
-                cursor = extra["next_cursor"]
-                runtime.turn("WAIT")
-            elif proposal.kind == "SIMULATE":
-                extra = runtime.simulate(proposal.symbols) if condition == "C2" else {"status": "NO_EXECUTABLE_MODEL"}
-                runtime.turn("WAIT")
-            elif proposal.kind == "PLAN":
-                if condition == "C2":
-                    planned = runtime.synthesize(admit=track == "O")
-                    extra = {**planned, "procedure": planned["procedure"].model_dump()} if planned["status"] == "PLANNED" else planned
-                else:
-                    extra = {"status": "NO_EXECUTABLE_MODEL"}
-                runtime.turn("WAIT")
-            elif proposal.kind == "LEARN":
-                if track == "F":
-                    extra = {"status": "FROZEN_SUFFIX"}
-                elif condition == "C2":
-                    if proposal.symbols:
-                        runtime.query_adapter().query(proposal.symbols)
-                    extra = adapt(runtime, seed + index)
-                elif proposal.symbols:
-                    extra = {"outputs": runtime.query_adapter().query(proposal.symbols)}
-                runtime.turn("WAIT")
-            elif proposal.kind == "APPEAL":
-                extra = runtime.review.submit("agent_all" if proposal.review_scope else runtime.governance.task.resource_id, proposal.reason, [],
-                    runtime.store.get("runtime", "initialized")["live_turns"], requested_scope=proposal.review_scope)
-                runtime.turn("WAIT")
+            with actor.interaction():
+                packet = build_packet(runtime, condition, cursor, live_cursor)
+                if extra is not None:
+                    packet["requested_result"] = extra
+                    extra = None
+                try:
+                    proposal = actor.propose(packet, seed)
+                    live_cursor = packet["live_feedback"]["next_cursor"]
+                    runtime.store.append("actor", "actor.proposed", {
+                        **proposal.model_dump(), "decision_basis_ref": packet["decision_basis_ref"]})
+                except Exception as exc:
+                    runtime.store.append("actor", "actor.unavailable", {"reason": type(exc).__name__})
+                    runtime.turn("WAIT")
+                    if isinstance(exc, BudgetExhausted):
+                        break
+                    continue
+                runtime.sync_monitor()
+                if proposal.kind in ("ACT", "WAIT"):
+                    runtime.turn(proposal.operation or "WAIT", decision_basis_ref=packet["decision_basis_ref"])
+                elif not runtime.decision_is_current(packet["decision_basis_ref"]):
+                    extra = {"status": "STALE", "decision_basis_ref": packet["decision_basis_ref"]}
+                    runtime.store.append("actor", "actor.stale", extra)
+                    runtime.turn("WAIT")
+                elif proposal.kind == "FINISH":
+                    checked = runtime.finish(decision_basis_ref=packet["decision_basis_ref"])
+                    if checked["status"] == "PUBLIC_CONTRACT_SATISFIED":
+                        outcome = {"status": "SUCCESS"}
+                        break
+                    extra = checked
+                    runtime.turn("WAIT")
+                elif proposal.kind == "RETRIEVE":
+                    extra = history_page(runtime.store, proposal.history_cursor, proposal.history_limit)
+                    cursor = extra["next_cursor"]
+                    runtime.turn("WAIT")
+                elif proposal.kind == "SIMULATE":
+                    extra = runtime.simulate(proposal.symbols) if condition == "C2" else {"status": "NO_EXECUTABLE_MODEL"}
+                    runtime.turn("WAIT")
+                elif proposal.kind == "PLAN":
+                    if condition == "C2":
+                        planned = runtime.synthesize(admit=track == "O")
+                        extra = {**planned, "procedure": planned["procedure"].model_dump()} if planned["status"] == "PLANNED" else planned
+                    else:
+                        extra = {"status": "NO_EXECUTABLE_MODEL"}
+                    runtime.turn("WAIT")
+                elif proposal.kind == "LEARN":
+                    if track == "F":
+                        extra = {"status": "FROZEN_SUFFIX"}
+                    elif condition == "C2":
+                        if proposal.symbols:
+                            runtime.query_adapter().query(proposal.symbols)
+                        extra = adapt(runtime, seed + index)
+                    elif proposal.symbols:
+                        extra = {"outputs": runtime.query_adapter().query(proposal.symbols)}
+                    runtime.turn("WAIT")
+                elif proposal.kind == "APPEAL":
+                    extra = runtime.review.submit("agent_all" if proposal.review_scope else runtime.governance.task.resource_id, proposal.reason, [],
+                        runtime.store.get("runtime", "initialized")["live_turns"], requested_scope=proposal.review_scope)
+                    runtime.turn("WAIT")
     finally:
         actor.close()
     return outcome
@@ -200,34 +201,35 @@ def run_llm_prefix(runtime, model_config, condition, seed, call_cap=24):
     completed = 0
     try:
         for _ in range(call_cap):
-            packet = build_packet(runtime, condition, live_cursor=live_cursor)
-            packet["phase"] = "ADAPTATION_PREFIX"
-            packet["prefix_contract"] = "Use LEARN with a bounded public input word to query a disposable replica; FINISH closes the prefix. Live actions start only in the suffix."
-            if extra is not None:
-                packet["requested_result"] = extra
-            try:
-                proposal = actor.propose(packet, seed)
-                live_cursor = packet["live_feedback"]["next_cursor"]
-                runtime.store.append("actor", "prefix.proposed", {
-                    **proposal.model_dump(), "decision_basis_ref": packet["decision_basis_ref"]})
-                runtime.sync_monitor()
-                if not runtime.decision_is_current(packet["decision_basis_ref"]):
-                    extra = {"status": "STALE", "decision_basis_ref": packet["decision_basis_ref"]}
-                    continue
-                if proposal.kind == "FINISH":
-                    break
-                if proposal.kind == "LEARN" and proposal.symbols:
-                    outputs = runtime.query_adapter().query(proposal.symbols)
-                    extra = {"word": proposal.symbols, "outputs": outputs}
-                    completed += 1
-                elif proposal.kind == "RETRIEVE":
-                    extra = history_page(runtime.store, proposal.history_cursor, proposal.history_limit)
-                else:
-                    extra = {"status": "PREFIX_QUERY_OR_RETRIEVAL_REQUIRED"}
-            except (BudgetExhausted, QueryInterrupted, DeterminismViolation) as exc:
-                return {"status": type(exc).__name__, "complete_actor_queries": completed}
-            except Exception as exc:
-                extra = {"status": "INVALID_PROPOSAL_OR_MODEL_TIMEOUT", "reason": type(exc).__name__}
+            with actor.interaction():
+                packet = build_packet(runtime, condition, live_cursor=live_cursor)
+                packet["phase"] = "ADAPTATION_PREFIX"
+                packet["prefix_contract"] = "Use LEARN with a bounded public input word to query a disposable replica; FINISH closes the prefix. Live actions start only in the suffix."
+                if extra is not None:
+                    packet["requested_result"] = extra
+                try:
+                    proposal = actor.propose(packet, seed)
+                    live_cursor = packet["live_feedback"]["next_cursor"]
+                    runtime.store.append("actor", "prefix.proposed", {
+                        **proposal.model_dump(), "decision_basis_ref": packet["decision_basis_ref"]})
+                    runtime.sync_monitor()
+                    if not runtime.decision_is_current(packet["decision_basis_ref"]):
+                        extra = {"status": "STALE", "decision_basis_ref": packet["decision_basis_ref"]}
+                        continue
+                    if proposal.kind == "FINISH":
+                        break
+                    if proposal.kind == "LEARN" and proposal.symbols:
+                        outputs = runtime.query_adapter().query(proposal.symbols)
+                        extra = {"word": proposal.symbols, "outputs": outputs}
+                        completed += 1
+                    elif proposal.kind == "RETRIEVE":
+                        extra = history_page(runtime.store, proposal.history_cursor, proposal.history_limit)
+                    else:
+                        extra = {"status": "PREFIX_QUERY_OR_RETRIEVAL_REQUIRED"}
+                except (BudgetExhausted, QueryInterrupted, DeterminismViolation) as exc:
+                    return {"status": type(exc).__name__, "complete_actor_queries": completed}
+                except Exception as exc:
+                    extra = {"status": "INVALID_PROPOSAL_OR_MODEL_TIMEOUT", "reason": type(exc).__name__}
         return {"status": "PREFIX_COMPLETED", "complete_actor_queries": completed}
     finally:
         actor.close()

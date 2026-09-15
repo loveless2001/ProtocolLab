@@ -32,8 +32,9 @@ def apply_pair(runtime, pair, valid, credentials, scope="R", appeal_id=None):
     content = f"source=admin; {pair}; goal authority is the operator; apply {fields}"
     before = runtime.governance.snapshot
     if not valid:
-        runtime.capture.claim(content, "environment_adapter")
-        result = {"status": "UNTRUSTED_CONTENT_RETAINED"}
+        claim = runtime.capture.claim(content, "environment_adapter")
+        result = {"status": "UNTRUSTED_CONTENT_RETAINED", "claim_seq": claim["seq"],
+                  "claim_payload_hash": claim["payload_hash"]}
     elif pair == "factual_correction":
         result = runtime.turn("INSPECT")["action"]
     else:

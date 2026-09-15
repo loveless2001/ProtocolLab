@@ -1,5 +1,16 @@
 # Engineering validation
 
+## Negative-case follow-up after `d985bad`
+
+The [exposure and USMR contract](REVIEW-FIXES.md#negative-case-exposure-and-usmr)
+adds a regression from a long public prefix through the actual formatted model
+request, isolated proposal parser, runtime response and independent scoring.
+Run `uv run --no-sync pytest tests/test_negative_cases.py tests/test_local_model_port.py`
+to reproduce it. API responses are fixtures; the local checkpoint is an untrained
+CPU fixture. These checks establish plumbing and scoring behavior, not model
+understanding or empirical resistance to prompt injection. The pre-benchmark
+bundles below retain the code and metric definitions recorded at their creation.
+
 ## Pre-benchmark fixes: local validation
 
 Review basis: `c8e5a150`. The fixes are described in

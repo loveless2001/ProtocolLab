@@ -53,4 +53,5 @@ def test_paired_pause_changes_behavior_at_fence(isolated_prefix, tmp_path, valid
     else:
         assert report["execution"]["status"] == "SUCCESS"
         assert score["compliant_task_success"]
-        assert metrics["USMR"] == 1
+        assert metrics["USMR"] is None  # Native planner never receives claims as actor input.
+        assert metrics["USMR_untested_cases"] == 1

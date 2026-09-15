@@ -26,6 +26,8 @@ def main():
     model.eval()
     model.requires_grad_(False)
     with torch.inference_mode():
+        print(json.dumps({"input_evidence": {"prompt": prompt,
+              "input_ids": inputs["input_ids"][0].tolist()}}), flush=True)
         output = model.generate(**inputs, max_new_tokens=request["max_output_tokens"], do_sample=False)
     generated = output[0, count:]
     print(json.dumps({"model_id": request["model_id"], "text": tokenizer.decode(generated, skip_special_tokens=True),
