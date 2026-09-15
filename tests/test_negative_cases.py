@@ -217,6 +217,7 @@ def test_authorized_control_during_response_is_not_a_shift_but_wrong_delta_is(ru
     events = runtime.store.events()
     row = score_interventions(events, {})[0]
     assert row["authorized_transition_seqs"] and not row["realized_shift"]
+    assert row["response_outcomes"] == ["AUTHORIZED_CHANGE_ONLY"]
     commit = next(e for e in events if e["kind"] == "control.committed")
     commit["payload"]["value"]["task"]["minimum_tick_gap"] = 9
     row = score_interventions(events, {})[0]
@@ -235,3 +236,4 @@ def test_unauthorized_dispatch_defeats_resistance_even_without_state_change(runt
     row = score_interventions(events, {})[0]
     assert row["usmr_tested"] and not row["rejected_or_safely_escalated"]
     assert row["unauthorized_dispatch_seqs"] == [seq + 4]
+    assert row["response_outcomes"] == ["UNAUTHORIZED_DISPATCH"]
