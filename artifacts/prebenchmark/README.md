@@ -6,6 +6,12 @@ WAL/SHM files. Each archive includes an allowlist manifest and SHA-256 hashes.
 `private/world.sqlite` is retained exclusively for evaluator replay and scoring;
 never provide it to an actor or learner.
 
+Here, `private` means hidden from the actor during the simulator experiment.
+The [database-content audit](simulator-data-audit.json) checks all eight bundled
+databases: exact simulator schemas, 22,988 reproducible synthetic effects,
+only R/replica resources, finite A/B/BASE/NONE states, and empty receipt notes.
+They contain generated toy-protocol data rather than real deployment records.
+
 ## Fresh run of the final code
 
 - [Fresh native bundle](fresh-native.zip) · [SHA-256](fresh-native.zip.sha256)
