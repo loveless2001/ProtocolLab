@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import time
 
-from protocollab.contracts import MUTATIONS, ActionProposal, canonical, digest, uid
+from protocollab.contracts import MUTATIONS, ActionProposal, DecisionBasis, canonical, digest, uid
 from protocollab.modeling import prediction
+from protocollab.storage import RecoveryRequired
 
 
 class InjectedCrash(BaseException):
@@ -31,6 +32,13 @@ class ActionBroker:
 
     def _authorize(self, proposal):
         state, belief, model = self.governance.snapshot, self.belief.snapshot, self.model_provider()
+        try:
+            basis = DecisionBasis.model_validate(self.store.blob(proposal.decision_basis_ref))
+        except (KeyError, ValueError, RecoveryRequired):
+            return "INVALID_DECISION_BASIS"
+        if any(getattr(proposal, field) != getattr(basis, field) for field in
+               ("namespace", "resource_id", "belief_rev", "model_rev", "goal_rev", "control_epoch")):
+            return "DECISION_BASIS_MISMATCH"
         if proposal.namespace != self.store.namespace or proposal.resource_id != state["task"]["resource_id"]:
             return "RESOURCE_OUT_OF_SCOPE"
         if proposal.operation in MUTATIONS and self.store.db.execute(
@@ -96,6 +104,7 @@ class ActionBroker:
                     "command_id": command_id, "resource_id": proposal.resource_id,
                     "operation": proposal.operation, "epoch": proposal.control_epoch,
                     "goal_rev": proposal.goal_rev, "model_rev": proposal.model_rev,
+                    "belief_rev": proposal.belief_rev, "decision_basis_ref": proposal.decision_basis_ref,
                     "prediction_id": predicted.prediction_id,
                 })
                 self.store.db.execute("UPDATE actions SET status='DISPATCHED',dispatch_seq=? WHERE command_id=?",

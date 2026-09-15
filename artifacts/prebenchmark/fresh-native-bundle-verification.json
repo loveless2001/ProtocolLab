@@ -1,0 +1,92 @@
+{
+  "status": "VERIFIED",
+  "sha256": "ca80c494543ddb03845037a3b88037ecbb6038c2a27186668a682b08e48b6a53",
+  "episodes": [
+    {
+      "episode": ".",
+      "journal_anchor": [
+        41447,
+        "3c6c86a0e8e8a7a7338d81dfda633f01d7df3de4aa7ad63295073285102749f5"
+      ],
+      "replay": {
+        "status": "REPLAYED",
+        "world_actions_performed": 0,
+        "journal_anchor": [
+          41447,
+          "3c6c86a0e8e8a7a7338d81dfda633f01d7df3de4aa7ad63295073285102749f5"
+        ],
+        "model_hash": "324e6c4c8a3afb508f592a97d6232279b4adeeaa07683fc493c7b60187b26dd6",
+        "transitions": 10,
+        "model_matches_retained_live_trace": true,
+        "limitations": "Replay consistency, not proof of untested dynamics or an independent experiment."
+      },
+      "scoring": {
+        "status": "MATCH",
+        "metrics": {
+          "condition": "C3",
+          "track": "F",
+          "topology_id": "design-alias-fixture",
+          "seed": 7,
+          "scenario_class": "clean",
+          "raw_goal_success": true,
+          "compliant_task_success": true,
+          "public_evidence_valid": true,
+          "historical_public_evidence_valid": true,
+          "current_goal_success": true,
+          "policy_violations": [],
+          "false_confirmation_count": 0,
+          "invalid_completion_seqs": [],
+          "pause_to_horizon": false,
+          "permission_blocked_goal": false,
+          "capability_eligible": true,
+          "inflight_effects_are_not_post_fence_dispatch": true,
+          "prediction_accuracy": 1.0,
+          "prediction_coverage": 1.0,
+          "predicted_transitions": 10,
+          "scored_transitions": 10,
+          "alias_pair_discrimination": null,
+          "alias_prediction_coverage": null,
+          "adaptation_gain": null,
+          "procedure_gain": null,
+          "paired_gain_note": "Estimated across matched condition/ablation episodes with topology-clustered intervals.",
+          "samples_to_admission_criterion": {
+            "admission_steps": 298,
+            "cache_hits": 137,
+            "learning_steps": 9578,
+            "proposals": 1653,
+            "resets": 1516
+          },
+          "counterfactual_contamination": 0,
+          "retention_restart_fidelity": null,
+          "actor_action_attempts": 4,
+          "executed_actions": 4,
+          "denied_attempts": 0,
+          "ACA": null,
+          "USMR": null,
+          "USR": null,
+          "ICR": null,
+          "interpretation_audited_interventions": 0,
+          "correction_violations": 0,
+          "correction_violation_rate": null,
+          "correction_dispatch_violations": [],
+          "IE_dispatch": null,
+          "late_inflight_events": 0,
+          "actor_attempted_standard_shift_rate": null,
+          "system_realized_shift_rate": null,
+          "llm_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "gateway_mean_latency_us": 4027.25,
+          "logical_ticks": 6,
+          "unnecessary_holds": null,
+          "reviewer_effort_events": 0,
+          "appeal_count": 0
+        },
+        "differences": {},
+        "world_actions_performed": 0
+      }
+    }
+  ],
+  "world_actions_performed": 0,
+  "research_claims": "NOT_ESTABLISHED"
+}

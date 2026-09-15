@@ -1,6 +1,65 @@
 {
   "spec_version": "0.1",
   "schemas": {
+    "DecisionBasis": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "kind": {
+          "const": "decision.basis",
+          "default": "decision.basis",
+          "title": "Kind",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "resource_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "belief_rev": {
+          "minimum": 0,
+          "title": "Belief Rev",
+          "type": "integer"
+        },
+        "model_rev": {
+          "minimum": 0,
+          "title": "Model Rev",
+          "type": "integer"
+        },
+        "goal_rev": {
+          "minimum": 0,
+          "title": "Goal Rev",
+          "type": "integer"
+        },
+        "control_epoch": {
+          "minimum": 0,
+          "title": "Control Epoch",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "namespace",
+        "resource_id",
+        "belief_rev",
+        "model_rev",
+        "goal_rev",
+        "control_epoch"
+      ],
+      "title": "DecisionBasis",
+      "type": "object"
+    },
     "ActionProposal": {
       "additionalProperties": false,
       "properties": {
@@ -59,6 +118,11 @@
           "title": "Actor Principal Ref",
           "type": "string"
         },
+        "decision_basis_ref": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Decision Basis Ref",
+          "type": "string"
+        },
         "belief_rev": {
           "minimum": 0,
           "title": "Belief Rev",
@@ -107,6 +171,7 @@
         "resource_id",
         "operation",
         "actor_principal_ref",
+        "decision_basis_ref",
         "belief_rev",
         "model_rev",
         "goal_rev",
@@ -892,6 +957,18 @@
           ],
           "title": "Goal Artifact",
           "type": "string"
+        },
+        "goal_revision": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Goal Revision",
+          "type": "integer"
+        },
+        "minimum_tick_gap": {
+          "default": 2,
+          "minimum": 2,
+          "title": "Minimum Tick Gap",
+          "type": "integer"
         },
         "clock_contract": {
           "const": "live_command_then_tick/v1",

@@ -31,7 +31,7 @@ def model_replay(procedure, model, start_states):
         command = node.operation if node.node_type == "ACT" else "WAIT"
         for pair, targets in turn_branches(model, states, command).items():
             next_node = next((b.next_node for b in node.branches if (b.domain_output, b.tick_output) == pair), node.default_next)
-            next_age, next_count = evidence_step(age, count, command, pair[0], procedure.goal_artifact)
+            next_age, next_count = evidence_step(age, count, command, pair[0], procedure.goal_artifact, procedure.minimum_tick_gap)
             queue.append((next_node, targets, next_age, next_count, fuel - 1))
     return True, None, boundaries
 
@@ -62,6 +62,10 @@ class ProcedureRegistry:
             raise ValueError("STALE_MODEL")
         if procedure.protected_dependencies != protected_dependencies():
             raise PermissionError("PROTECTED_DEPENDENCY_CHANGE")
+        task = self.governance.task
+        if (procedure.goal_artifact, procedure.goal_revision, procedure.minimum_tick_gap) != (
+                task.artifact, task.revision, task.minimum_tick_gap):
+            raise ValueError("STALE_EVIDENCE_CONTRACT")
         good, reason, boundaries = model_replay(procedure, model, start_states)
         if not good:
             raise ValueError(reason)
@@ -115,11 +119,12 @@ def binding_valid(binding, current):
 
 
 class ProcedureRunner:
-    def __init__(self, runtime, procedure):
+    def __init__(self, runtime, procedure, decision_basis_ref=None):
         self.runtime, self.procedure = runtime, procedure
         self.nodes = {n.node_id: n for n in procedure.nodes}
         self.node_id, self.fuel = procedure.entry_node, procedure.max_steps
         self.binding = self.current_binding()
+        self.decision_basis_ref = decision_basis_ref or runtime.bind_decision()
         self.status = "READY"
 
     def current_binding(self):
@@ -132,9 +137,14 @@ class ProcedureRunner:
         hook = self.runtime.hooks.get("procedure_boundary")
         if hook:
             hook()
+        self.runtime.sync_monitor()
         if self.status not in ("READY", "RUNNING"):
             return {"status": self.status}
-        if not binding_valid(self.binding, self.current_binding()):
+        task = self.runtime.governance.task
+        if (not binding_valid(self.binding, self.current_binding())
+                or not self.runtime.decision_is_current(self.decision_basis_ref)
+                or (self.procedure.goal_artifact, self.procedure.goal_revision, self.procedure.minimum_tick_gap)
+                != (task.artifact, task.revision, task.minimum_tick_gap)):
             self.status = "STALE"
             return {"status": self.status}
         if self.runtime.governance.is_paused(self.runtime.governance.task.resource_id):
@@ -151,13 +161,26 @@ class ProcedureRunner:
             return {"status": self.status}
         self.fuel -= 1  # WAIT consumes fuel as ACT does.
         self.status = "RUNNING"
-        result = self.runtime.turn(node.operation if node.node_type == "ACT" else "WAIT")
+        result = self.runtime.turn(node.operation if node.node_type == "ACT" else "WAIT",
+                                   decision_basis_ref=self.decision_basis_ref)
         action = result.get("action")
         if action and action["status"] not in ("ACKNOWLEDGED", "OUTCOME_OBSERVED"):
             self.status = "INTERRUPTED"
             return {"status": self.status, "turn": result}
+        if not binding_valid(self.binding, self.current_binding()):
+            # A control may arrive while the completed step's receipt/tick is
+            # being captured. It cannot authorize the next old-policy branch.
+            self.status = "STALE"
+            return {"status": self.status, "turn": result}
         pair = (action["receipt"]["domain_output"] if action else None, result["tick"].domain_output)
         self.node_id = next((b.next_node for b in node.branches if (b.domain_output, b.tick_output) == pair), node.default_next)
         self.runtime.store.append("procedure", "procedure.step", {"hash": digest(self.procedure),
-            "remaining_fuel": self.fuel, "next_node": self.node_id, **self.binding})
+            "remaining_fuel": self.fuel, "next_node": self.node_id,
+            "decision_basis_ref": self.decision_basis_ref, **self.binding})
+        # Explicitly advance the decision basis only after interpreting this step's observations.
+        previous = self.decision_basis_ref
+        self.decision_basis_ref = self.runtime.bind_decision()
+        self.runtime.store.append("procedure", "decision.revalidated", {
+            "previous_basis_ref": previous, "decision_basis_ref": self.decision_basis_ref,
+            "procedure_hash": digest(self.procedure), "next_node": self.node_id})
         return {"status": self.status, "turn": result}

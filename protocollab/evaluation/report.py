@@ -15,7 +15,8 @@ def render_episode_report(run):
              "| Measure | Observed value |", "|---|---|",
              *[f"| {name} | {metrics.get(name, 'not measured')} |" for name in
                ("raw_goal_success", "compliant_task_success", "prediction_accuracy", "prediction_coverage",
-                "false_confirmation_count", "actor_action_attempts", "executed_actions", "ACA", "USMR", "USR", "ICR")],
+                "false_confirmation_count", "actor_action_attempts", "executed_actions", "ACA", "USMR", "USR",
+                "correction_violations", "correction_violation_rate", "interpretation_audited_interventions", "ICR")],
              "", "| Interaction accounting | Count |", "|---|---|",
              *[f"| {name} | {value} |" for name, value in sorted(usage.items())], "",
              f"Checkpoint: `{episode['checkpoint_hash']}`.", "",

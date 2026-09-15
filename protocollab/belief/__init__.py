@@ -58,16 +58,25 @@ class BeliefService:
     def completion(self, task, since_seq=0):
         eligible = []
         refs = set()
+        historical = []
+        contradicted = False
         for event in self.store.events(after=since_seq):
             if event["kind"] == "epistemic.observation":
                 obs = event["payload"]
-                if obs["resource_id"] == task.resource_id and obs["input_symbol"] == "INSPECT" and obs["source_principal_ref"] == "effect_sensor" and obs["domain_output"] == f"INSPECT:{task.artifact}:{task.health}":
-                    if obs["observation_id"] not in refs:
-                        refs.add(obs["observation_id"])
-                        eligible.append(obs)
-        for left in eligible:
-            for right in eligible:
-                if right["logical_tick"] - left["logical_tick"] >= task.minimum_tick_gap:
-                    return {"status": "PUBLIC_CONTRACT_SATISFIED", "observation_refs": [left["observation_id"], right["observation_id"]],
-                            "limitation": "Confirms only the two observed instants; pending work may remain."}
-        return {"status": "INSUFFICIENT_EVIDENCE", "observation_refs": []}
+                if (obs["resource_id"] != task.resource_id or obs["input_symbol"] != "INSPECT"
+                        or obs["source_principal_ref"] != "effect_sensor" or obs["observation_id"] in refs):
+                    continue
+                refs.add(obs["observation_id"])
+                if obs["domain_output"] != f"INSPECT:{task.artifact}:{task.health}":
+                    eligible = []
+                    contradicted = True
+                    continue
+                eligible.append(obs)
+                if eligible[-1]["logical_tick"] - eligible[0]["logical_tick"] >= task.minimum_tick_gap:
+                    historical = [eligible[0]["observation_id"], eligible[-1]["observation_id"]]
+                    contradicted = False
+        satisfied = bool(eligible and eligible[-1]["logical_tick"] - eligible[0]["logical_tick"] >= task.minimum_tick_gap)
+        return {"status": "PUBLIC_CONTRACT_SATISFIED" if satisfied else "INSUFFICIENT_EVIDENCE",
+                "observation_refs": [eligible[0]["observation_id"], eligible[-1]["observation_id"]] if satisfied else [],
+                "historical_confirmation_refs": historical, "contradicted_since_confirmation": bool(historical and contradicted),
+                "limitation": "Confirms observed instants only, with no newer contradictory reading; pending work may remain."}

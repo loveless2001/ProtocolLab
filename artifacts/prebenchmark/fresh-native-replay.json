@@ -1,0 +1,12 @@
+{
+  "status": "REPLAYED",
+  "world_actions_performed": 0,
+  "journal_anchor": [
+    41447,
+    "3c6c86a0e8e8a7a7338d81dfda633f01d7df3de4aa7ad63295073285102749f5"
+  ],
+  "model_hash": "324e6c4c8a3afb508f592a97d6232279b4adeeaa07683fc493c7b60187b26dd6",
+  "transitions": 10,
+  "model_matches_retained_live_trace": true,
+  "limitations": "Replay consistency, not proof of untested dynamics or an independent experiment."
+}

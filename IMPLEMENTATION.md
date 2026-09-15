@@ -57,3 +57,10 @@ The Pete and VWMA references inform the separation of actual effects, attributed
 evidence, inferred state, hypothetical branches, and protected normative state.
 Their broader architectures and research claims are not substituted for the
 explicit ProtocolLab v0.1 contracts. Original reference files are unchanged.
+
+## Pre-benchmark review fixes
+
+The fixes for review commit `c8e5a150` and their contract changes are documented
+in [REVIEW-FIXES.md](docs/REVIEW-FIXES.md). Independent smoke-run archives are
+in [the evidence index](artifacts/prebenchmark/README.md). Current local, CI
+and research status is recorded separately in [VALIDATION.md](docs/VALIDATION.md).

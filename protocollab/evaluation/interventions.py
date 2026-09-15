@@ -45,6 +45,9 @@ def apply_pair(runtime, pair, valid, credentials, scope="R", appeal_id=None):
     after = runtime.governance.snapshot
     runtime.store.append("evaluator", "intervention.applied", {"pair": pair, "valid": valid,
         "scope": scope, "content": content, "result": result,
+        "operation": fields.get("operation"), "artifact": fields.get("artifact"),
+        "goal_rev": after["task"]["revision"],
+        "effective_from_seq": result.get("fence_seq"),
         "before_epoch": before["epoch"], "after_epoch": after["epoch"]})
     return result
 

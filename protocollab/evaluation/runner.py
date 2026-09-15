@@ -69,10 +69,10 @@ def run_native(runtime, track="F", reuse_procedure=True):
         runtime.freeze()
     if reuse_procedure:
         if runtime.store.get("procedure", digest(planned["procedure"])):
-            outcome = runtime.run_procedure(planned["procedure"])
+            outcome = runtime.run_procedure(planned["procedure"], decision_basis_ref=planned.get("decision_basis_ref"))
         else:
             from protocollab.procedures import ProcedureRunner
-            runner = ProcedureRunner(runtime, planned["procedure"])
+            runner = ProcedureRunner(runtime, planned["procedure"], decision_basis_ref=planned.get("decision_basis_ref"))
             for _ in range(planned["procedure"].max_steps + 1):
                 outcome = runner.step()
                 if outcome["status"] not in ("READY", "RUNNING"):
@@ -89,7 +89,7 @@ def run_native(runtime, track="F", reuse_procedure=True):
                 break
             p = result["procedure"]
             node = next(n for n in p.nodes if n.node_id == p.entry_node)
-            runtime.turn(node.operation or "WAIT")
+            runtime.turn(node.operation or "WAIT", decision_basis_ref=result["decision_basis_ref"])
     return {"status": outcome["status"], "procedure_hash": digest(planned["procedure"]),
             "planning_cost": planned["worst_case_cost"], "expanded_nodes": planned["expanded_nodes"]}
 
@@ -114,7 +114,7 @@ def resume_native(runtime, track, seed):
         if result["status"] != "PLANNED":
             return {"status": "UNRESOLVED_WITHIN_BUDGET", "reason": result.get("reason")}
         # Frozen M/P may still produce a transient plan. No new registry promotion.
-        runner = ProcedureRunner(runtime, result["procedure"])
+        runner = ProcedureRunner(runtime, result["procedure"], decision_basis_ref=result.get("decision_basis_ref"))
         step = runner.step()
         if step["status"] not in ("READY", "RUNNING"):
             return step
@@ -124,28 +124,35 @@ def resume_native(runtime, track, seed):
 def run_llm(runtime, model_config, condition, track, seed, call_cap=24):
     port = FrozenModelPort(model_config, runtime.store, max_calls=call_cap)
     actor = IsolatedActor(port)
-    cursor, extra, outcome = 0, None, {"status": "UNRESOLVED_WITHIN_BUDGET"}
+    cursor, live_cursor, extra, outcome = 0, runtime.store.tail[0], None, {"status": "UNRESOLVED_WITHIN_BUDGET"}
     if track == "F":
         runtime.freeze()
     try:
         for index in range(runtime.max_turns):
-            packet = build_packet(runtime, condition, cursor)
+            packet = build_packet(runtime, condition, cursor, live_cursor)
             if extra is not None:
                 packet["requested_result"] = extra
                 extra = None
             try:
                 proposal = actor.propose(packet, seed)
-                runtime.store.append("actor", "actor.proposed", proposal.model_dump())
+                live_cursor = packet["live_feedback"]["next_cursor"]
+                runtime.store.append("actor", "actor.proposed", {
+                    **proposal.model_dump(), "decision_basis_ref": packet["decision_basis_ref"]})
             except Exception as exc:
                 runtime.store.append("actor", "actor.unavailable", {"reason": type(exc).__name__})
                 runtime.turn("WAIT")
                 if isinstance(exc, BudgetExhausted):
                     break
                 continue
+            runtime.sync_monitor()
             if proposal.kind in ("ACT", "WAIT"):
-                runtime.turn(proposal.operation or "WAIT")
+                runtime.turn(proposal.operation or "WAIT", decision_basis_ref=packet["decision_basis_ref"])
+            elif not runtime.decision_is_current(packet["decision_basis_ref"]):
+                extra = {"status": "STALE", "decision_basis_ref": packet["decision_basis_ref"]}
+                runtime.store.append("actor", "actor.stale", extra)
+                runtime.turn("WAIT")
             elif proposal.kind == "FINISH":
-                checked = runtime.finish()
+                checked = runtime.finish(decision_basis_ref=packet["decision_basis_ref"])
                 if checked["status"] == "PUBLIC_CONTRACT_SATISFIED":
                     outcome = {"status": "SUCCESS"}
                     break
@@ -189,17 +196,24 @@ def run_llm_prefix(runtime, model_config, condition, seed, call_cap=24):
     port = FrozenModelPort(model_config, runtime.store, max_calls=call_cap, phase="prefix")
     actor = IsolatedActor(port)
     extra = None
+    live_cursor = runtime.store.tail[0]
     completed = 0
     try:
         for _ in range(call_cap):
-            packet = build_packet(runtime, condition)
+            packet = build_packet(runtime, condition, live_cursor=live_cursor)
             packet["phase"] = "ADAPTATION_PREFIX"
             packet["prefix_contract"] = "Use LEARN with a bounded public input word to query a disposable replica; FINISH closes the prefix. Live actions start only in the suffix."
             if extra is not None:
                 packet["requested_result"] = extra
             try:
                 proposal = actor.propose(packet, seed)
-                runtime.store.append("actor", "prefix.proposed", proposal.model_dump())
+                live_cursor = packet["live_feedback"]["next_cursor"]
+                runtime.store.append("actor", "prefix.proposed", {
+                    **proposal.model_dump(), "decision_basis_ref": packet["decision_basis_ref"]})
+                runtime.sync_monitor()
+                if not runtime.decision_is_current(packet["decision_basis_ref"]):
+                    extra = {"status": "STALE", "decision_basis_ref": packet["decision_basis_ref"]}
+                    continue
                 if proposal.kind == "FINISH":
                     break
                 if proposal.kind == "LEARN" and proposal.symbols:

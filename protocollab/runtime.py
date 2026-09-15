@@ -6,7 +6,7 @@ from pathlib import Path
 
 from protocollab.belief import BeliefService
 from protocollab.capture import Capture
-from protocollab.contracts import ActionProposal, Task, digest, uid
+from protocollab.contracts import ActionProposal, DecisionBasis, Task, digest, uid
 from protocollab.gateway import ActionBroker
 from protocollab.governance import Governance
 from protocollab.learning import LearningLimits, QueryAdapter, learn
@@ -60,16 +60,32 @@ class Runtime:
             self.adapter.frozen = self.store.get("runtime", "phase") == "F_SUFFIX"
         return self.adapter
 
-    def proposal(self, operation, principal="actor"):
+    def current_decision_basis(self):
         control, belief, model = self.governance.snapshot, self.belief.snapshot, self.models.current_snapshot()
+        return DecisionBasis(namespace=self.store.namespace, resource_id=control["task"]["resource_id"],
+            belief_rev=belief.revision, model_rev=model.artifact.revision if model else 0,
+            goal_rev=control["task"]["revision"], control_epoch=control["epoch"])
+
+    def bind_decision(self):
+        with self.store.lock:
+            return self.store.put_blob(self.current_decision_basis())
+
+    def decision_is_current(self, decision_basis_ref):
+        basis = DecisionBasis.model_validate(self.store.blob(decision_basis_ref))
+        return basis == self.current_decision_basis()
+
+    def proposal(self, operation, principal="actor", decision_basis_ref=None):
+        decision_basis_ref = decision_basis_ref or self.bind_decision()
+        basis = DecisionBasis.model_validate(self.store.blob(decision_basis_ref))
         command_id = uid("command")
         return ActionProposal(proposal_id=uid("proposal"), command_id=command_id,
-            namespace=self.store.namespace, resource_id=control["task"]["resource_id"], operation=operation,
-            actor_principal_ref=principal, belief_rev=belief.revision,
-            model_rev=model.artifact.revision if model else 0, goal_rev=control["task"]["revision"],
-            control_epoch=control["epoch"], idempotency_key=command_id)
+            **basis.model_dump(exclude={"schema_version", "kind"}), operation=operation,
+            actor_principal_ref=principal, decision_basis_ref=decision_basis_ref,
+            idempotency_key=command_id)
 
-    def turn(self, command="WAIT", before_dispatch=None):
+    def turn(self, command="WAIT", before_dispatch=None, decision_basis_ref=None):
+        # Bind before any pending controls are processed, never after selection.
+        decision_basis_ref = decision_basis_ref or self.bind_decision()
         self.process_controls()
         if self.budget_check:
             self.budget_check()
@@ -79,10 +95,21 @@ class Runtime:
             raise RuntimeError("LIVE_TURN_BUDGET_EXHAUSTED")
         result = None
         if command != "WAIT":
-            result = self.broker.propose_and_dispatch(self.proposal(command), before_dispatch=before_dispatch or self.hooks.get("after_validate"))
+            def dispatch_boundary():
+                hook = before_dispatch or self.hooks.get("after_validate")
+                if hook:
+                    hook()
+                self.process_controls()
+            result = self.broker.propose_and_dispatch(
+                self.proposal(command, decision_basis_ref=decision_basis_ref),
+                before_dispatch=dispatch_boundary)
         tick = self.broker.tick()  # also advances during pause, denial or actor timeout
         initialized["live_turns"] += 1
         self.store.set("runtime", "initialized", initialized, "turn.completed")
+        self.store.set("runtime", "latest_turn", {"action": result, "tick": tick.model_dump(),
+                                                   "decision_basis_ref": decision_basis_ref})
+        if result is not None:
+            self.store.set("runtime", "latest_action", result)
         self.review.expire(tick.logical_tick)
         self.sync_monitor()
         return {"action": result, "tick": tick}
@@ -143,11 +170,18 @@ class Runtime:
     def synthesize(self, admit=True):
         if self.hooks.get("before_plan"):
             self.hooks["before_plan"]()
+        self.sync_monitor()
+        decision_basis_ref = self.bind_decision()
         model = self.models.current_snapshot()
         if not model:
             return {"status": "NO_PLAN_WITHIN_BOUND", "reason": "NO_ACTIVE_MODEL"}
         task = self.governance.task
         result = self.planner(model, self.belief.snapshot, task, self.governance.snapshot["permissions"][task.resource_id])
+        result["decision_basis_ref"] = decision_basis_ref
+        self.sync_monitor()
+        if not self.decision_is_current(decision_basis_ref):
+            self.store.append("planner", "planner.stale", {"decision_basis_ref": decision_basis_ref})
+            return {"status": "STALE", "decision_basis_ref": decision_basis_ref}
         if result.get("worker_usage"):
             self.store.append("planner", "planner.usage", result["worker_usage"])
         if result["status"] == "PLANNED":
@@ -158,15 +192,16 @@ class Runtime:
             self.procedures.admit(result["procedure"], self.belief.snapshot.possible_model_states, self.query_adapter())
         return result
 
-    def run_procedure(self, procedure, before_step=None):
+    def run_procedure(self, procedure, before_step=None, decision_basis_ref=None):
         registered = self.store.get("procedure", digest(procedure))
         if not registered or registered["status"] != "ACTIVE" or registered["model_hash"] != self.models.current_snapshot().hash:
             raise PermissionError("ACTIVE_PROCEDURE_REQUIRED")
         if set(registered["start_states"]) != set(self.belief.snapshot.possible_model_states):
             raise ValueError("PROCEDURE_PRECONDITION_FAILED")
-        if procedure.goal_artifact != self.governance.task.artifact:
+        if (procedure.goal_artifact != self.governance.task.artifact
+                or procedure.goal_revision != self.governance.task.revision):
             raise ValueError("STALE_GOAL")
-        runner = ProcedureRunner(self, procedure)
+        runner = ProcedureRunner(self, procedure, decision_basis_ref=decision_basis_ref)
         for index in range(procedure.max_steps + 1):
             if before_step:
                 before_step(index)
@@ -182,13 +217,18 @@ class Runtime:
         # Branch storage is a separate artifact owner; no real-state/journal writes during simulation.
         return simulate(self.belief.snapshot, model, symbols)
 
-    def finish(self):
+    def finish(self, decision_basis_ref=None):
+        decision_basis_ref = decision_basis_ref or self.bind_decision()
+        self.sync_monitor()
+        if not self.decision_is_current(decision_basis_ref):
+            return {"status": "STALE", "decision_basis_ref": decision_basis_ref}
         last_redirect = 0
         for event in self.store.events():
             if event["kind"] == "control.accepted" and event["payload"]["event"]["verb"] == "REDIRECT":
                 last_redirect = event["seq"]
         result = self.belief.completion(self.governance.task, last_redirect)
-        self.store.append("completion", "completion.checked", {**result, "goal_rev": self.governance.task.revision})
+        self.store.append("completion", "completion.checked", {**result,
+            "goal_rev": self.governance.task.revision, "decision_basis_ref": decision_basis_ref})
         return result
 
     def freeze(self):

@@ -35,13 +35,15 @@ def turn_branches(model, states, command):
     return {pair: tuple(sorted(states)) for pair, states in groups.items()}
 
 
-def evidence_step(age, count, command, output, artifact):
-    if command == "INSPECT" and output == f"INSPECT:{artifact}:HEALTHY":
+def evidence_step(age, count, command, output, artifact, minimum_tick_gap=2):
+    if command == "INSPECT":
+        if output != f"INSPECT:{artifact}:HEALTHY":
+            return -1, 0
         if count == 0:
             age, count = 0, 1
-        elif age >= 2:
+        elif age >= minimum_tick_gap:
             count = 2
-    return min(2, age + 1) if age >= 0 else -1, count
+    return min(minimum_tick_gap, age + 1) if age >= 0 else -1, count
 
 
 def plan(model, belief, task, allowed=None, limits=None):
@@ -70,7 +72,7 @@ def plan(model, belief, task, allowed=None, limits=None):
             branches = turn_branches(model, states, command)
             children, worst = {}, 0
             for pair, targets in branches.items():
-                next_age, next_count = evidence_step(age, count, command, pair[0], task.artifact)
+                next_age, next_count = evidence_step(age, count, command, pair[0], task.artifact, task.minimum_tick_gap)
                 result = search(targets, next_age, next_count, fuel - cost, depth - 1)
                 if result is None:
                     break
@@ -116,6 +118,7 @@ def plan(model, belief, task, allowed=None, limits=None):
         return {"status": "NO_PLAN_WITHIN_BOUND", "reason": "PROCEDURE_SIZE", "expanded_nodes": expanded}
     procedure = ProcedureArtifact(procedure_id=uid("procedure"), namespace=model.artifact.namespace,
         revision=model.artifact.revision, model_hash=model.hash, goal_artifact=task.artifact,
+        goal_revision=task.revision, minimum_tick_gap=task.minimum_tick_gap,
         entry_node=entry, max_steps=min(limits.depth, limits.procedure_steps), nodes=nodes,
         protected_dependencies=protected_dependencies())
     return {"status": "PLANNED", "procedure": procedure, "worst_case_cost": result[0], "expanded_nodes": expanded}

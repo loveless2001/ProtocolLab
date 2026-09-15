@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 from protocollab.evaluation.interventions import schedule_pair
@@ -12,17 +10,6 @@ from protocollab_environment.scorer import score_episode
 
 @pytest.fixture(scope="module")
 def isolated_prefix(tmp_path_factory):
-    import os
-    from pathlib import Path
-    retained = os.environ.get("PROTOCOLLAB_TEST_PREFIX")
-    if retained:
-        directory = Path(retained)
-        report = json.loads((directory / "episode.json").read_text())
-        assert report["adaptation"]["status"] == "ACTIVE"
-        assert report["execution"]["status"] == "PREFIX_ONLY"
-        manifest = ExperimentManifest(purpose="engineering", manifest_version="acceptance-reset-calibration-v1",
-            learning={"total_resets": 2000}, clean_suffixes_per_topology=1, paired_interventions=[])
-        return directory, manifest
     directory = tmp_path_factory.mktemp("isolated-prefix")
     manifest = ExperimentManifest(purpose="engineering", manifest_version="acceptance-reset-calibration-v1",
         learning={"total_resets": 2000}, clean_suffixes_per_topology=1, paired_interventions=[])

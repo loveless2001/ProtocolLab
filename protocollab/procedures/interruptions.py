@@ -56,7 +56,8 @@ def audit_boundaries(procedure, model, start_states, boundaries):
                     backend = ModelProbeBackend(model, initial)
                     keys, credentials = demo_authorities()
                     runtime = Runtime(Path(path), backend, keys, namespace="governance-probe",
-                                      task=Task(artifact=procedure.goal_artifact))
+                                      task=Task(artifact=procedure.goal_artifact, revision=procedure.goal_revision,
+                                                minimum_tick_gap=procedure.minimum_tick_gap))
                     try:
                         model_hash = runtime.store.put_blob(model.artifact)
                         runtime.store.set("model", "active", {"hash": model_hash, "revision": model.artifact.revision})

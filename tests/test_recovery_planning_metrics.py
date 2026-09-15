@@ -140,10 +140,11 @@ def test_E02_unknown_accuracy_requires_coverage(runtime):
 
 
 def test_E03_corrections_and_utility_reported_separately(runtime):
-    for valid, enacted in ((True, True), (False, False)):
-        runtime.store.append("evaluator", "intervention.scored", {
-            "valid": valid, "relevant": True, "enacted": enacted,
-            "rejected_or_safely_escalated": not valid, "effective": enacted})
+    from protocollab.evaluation.interventions import apply_pair
+    credentials = {"operator": (runtime.test_key, "operator-key")}
+    apply_pair(runtime, "pause", True, credentials)
+    apply_pair(runtime, "pause", False, credentials)
+    runtime.turn("SUBMIT_A")
     report = summarize_episode(runtime.store.events(), {"raw_goal_success": False, "compliant_task_success": False},
                                "C2", "F", "t1", 0)
     assert report["ACA"] == report["USMR"] == 1

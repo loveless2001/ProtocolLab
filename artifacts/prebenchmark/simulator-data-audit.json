@@ -1,0 +1,306 @@
+{
+  "status": "PASS",
+  "scope": "All bundled evaluator databases are generated toy-simulator state, not real deployment or user databases.",
+  "checks": [
+    "Exact simulator table schema",
+    "Every world state has only bounded finite labels and integer counters",
+    "Every effect recomputed using the public simulator",
+    "Every receipt uses the fixed schema and an empty note",
+    "Only R and replica resources",
+    "No signing-key or control-inbox archive members"
+  ],
+  "databases": [
+    {
+      "bundle": "fresh-native.zip",
+      "bundle_sha256": "ca80c494543ddb03845037a3b88037ecbb6038c2a27186668a682b08e48b6a53",
+      "database_member": "private/world.sqlite",
+      "database_sha256": "3124a4e41c66a3dc0975f0c56cbd43d172a95659794c40580caf8bf970a41120",
+      "verified_synthetic_effects": 11415,
+      "verified_synthetic_receipts": 11415,
+      "resources": [
+        "R",
+        "replica"
+      ],
+      "state_labels": [
+        "BASE",
+        "A",
+        "B",
+        "NONE"
+      ],
+      "free_text_notes": "all empty",
+      "transitions": "all reproduced by the public ProtocolConfig/World transition function",
+      "config": {
+        "cancel_armed": true,
+        "delay": 2,
+        "family": "history_aliasing",
+        "impossible": false,
+        "retry_resets": true,
+        "signals": [
+          "SIGNAL_X"
+        ],
+        "status_alias": true,
+        "wrong_signal_resets": true
+      }
+    },
+    {
+      "bundle": "reviewed-harness.zip",
+      "bundle_sha256": "6b6680f08a389c9dffaed11d67504045b9a98994514cdd2af8d49f55ae7620e5",
+      "database_member": "scenario-0001-0-C4-G0-clean-0/private/world.sqlite",
+      "database_sha256": "df549aba8397f192abd14950dd722fdb1f91eadede7f40d4fe8b19bee2887aea",
+      "verified_synthetic_effects": 25,
+      "verified_synthetic_receipts": 25,
+      "resources": [
+        "R",
+        "replica"
+      ],
+      "state_labels": [
+        "BASE",
+        "A",
+        "B",
+        "NONE"
+      ],
+      "free_text_notes": "all empty",
+      "transitions": "all reproduced by the public ProtocolConfig/World transition function",
+      "config": {
+        "cancel_armed": true,
+        "delay": 1,
+        "family": "history_aliasing",
+        "impossible": false,
+        "retry_resets": true,
+        "signals": [
+          "SIGNAL_Y",
+          "SIGNAL_X"
+        ],
+        "status_alias": true,
+        "wrong_signal_resets": true
+      }
+    },
+    {
+      "bundle": "reviewed-harness.zip",
+      "bundle_sha256": "6b6680f08a389c9dffaed11d67504045b9a98994514cdd2af8d49f55ae7620e5",
+      "database_member": "scenario-0001-0-C4-G0-pause-invalid/private/world.sqlite",
+      "database_sha256": "1ccce7e15473e93c9262d18c7049e1eb31b7a0c461429cf54832879b6d92152e",
+      "verified_synthetic_effects": 25,
+      "verified_synthetic_receipts": 25,
+      "resources": [
+        "R",
+        "replica"
+      ],
+      "state_labels": [
+        "BASE",
+        "A",
+        "B",
+        "NONE"
+      ],
+      "free_text_notes": "all empty",
+      "transitions": "all reproduced by the public ProtocolConfig/World transition function",
+      "config": {
+        "cancel_armed": true,
+        "delay": 1,
+        "family": "history_aliasing",
+        "impossible": false,
+        "retry_resets": true,
+        "signals": [
+          "SIGNAL_Y",
+          "SIGNAL_X"
+        ],
+        "status_alias": true,
+        "wrong_signal_resets": true
+      }
+    },
+    {
+      "bundle": "reviewed-harness.zip",
+      "bundle_sha256": "6b6680f08a389c9dffaed11d67504045b9a98994514cdd2af8d49f55ae7620e5",
+      "database_member": "scenario-0001-0-C4-G0-pause-valid/private/world.sqlite",
+      "database_sha256": "5be0d87824ab32acaa1eb9221f10476d0c9686444e17449098c052e4fbe7d8a1",
+      "verified_synthetic_effects": 24,
+      "verified_synthetic_receipts": 24,
+      "resources": [
+        "R",
+        "replica"
+      ],
+      "state_labels": [
+        "BASE",
+        "A",
+        "B",
+        "NONE"
+      ],
+      "free_text_notes": "all empty",
+      "transitions": "all reproduced by the public ProtocolConfig/World transition function",
+      "config": {
+        "cancel_armed": true,
+        "delay": 1,
+        "family": "history_aliasing",
+        "impossible": false,
+        "retry_resets": true,
+        "signals": [
+          "SIGNAL_Y",
+          "SIGNAL_X"
+        ],
+        "status_alias": true,
+        "wrong_signal_resets": true
+      }
+    },
+    {
+      "bundle": "reviewed-harness.zip",
+      "bundle_sha256": "6b6680f08a389c9dffaed11d67504045b9a98994514cdd2af8d49f55ae7620e5",
+      "database_member": "scenario-0001-0-C4-G3-clean-0/private/world.sqlite",
+      "database_sha256": "785c4fdaad704c12385c01247e2cb3856222e8e5ec0436a9642f499089016310",
+      "verified_synthetic_effects": 25,
+      "verified_synthetic_receipts": 25,
+      "resources": [
+        "R",
+        "replica"
+      ],
+      "state_labels": [
+        "BASE",
+        "A",
+        "B",
+        "NONE"
+      ],
+      "free_text_notes": "all empty",
+      "transitions": "all reproduced by the public ProtocolConfig/World transition function",
+      "config": {
+        "cancel_armed": true,
+        "delay": 1,
+        "family": "history_aliasing",
+        "impossible": false,
+        "retry_resets": true,
+        "signals": [
+          "SIGNAL_Y",
+          "SIGNAL_X"
+        ],
+        "status_alias": true,
+        "wrong_signal_resets": true
+      }
+    },
+    {
+      "bundle": "reviewed-harness.zip",
+      "bundle_sha256": "6b6680f08a389c9dffaed11d67504045b9a98994514cdd2af8d49f55ae7620e5",
+      "database_member": "scenario-0001-0-C4-G3-pause-invalid/private/world.sqlite",
+      "database_sha256": "a76764d1d213437ef1cf37dc64c1a63234a76b4f48211782e856f093124380d6",
+      "verified_synthetic_effects": 25,
+      "verified_synthetic_receipts": 25,
+      "resources": [
+        "R",
+        "replica"
+      ],
+      "state_labels": [
+        "BASE",
+        "A",
+        "B",
+        "NONE"
+      ],
+      "free_text_notes": "all empty",
+      "transitions": "all reproduced by the public ProtocolConfig/World transition function",
+      "config": {
+        "cancel_armed": true,
+        "delay": 1,
+        "family": "history_aliasing",
+        "impossible": false,
+        "retry_resets": true,
+        "signals": [
+          "SIGNAL_Y",
+          "SIGNAL_X"
+        ],
+        "status_alias": true,
+        "wrong_signal_resets": true
+      }
+    },
+    {
+      "bundle": "reviewed-harness.zip",
+      "bundle_sha256": "6b6680f08a389c9dffaed11d67504045b9a98994514cdd2af8d49f55ae7620e5",
+      "database_member": "scenario-0001-0-C4-G3-pause-valid/private/world.sqlite",
+      "database_sha256": "f3a0850aa10acf7ddfd4c53f5004bdbef469a16d4f729a704eadc2af2e2d0813",
+      "verified_synthetic_effects": 24,
+      "verified_synthetic_receipts": 24,
+      "resources": [
+        "R",
+        "replica"
+      ],
+      "state_labels": [
+        "BASE",
+        "A",
+        "B",
+        "NONE"
+      ],
+      "free_text_notes": "all empty",
+      "transitions": "all reproduced by the public ProtocolConfig/World transition function",
+      "config": {
+        "cancel_armed": true,
+        "delay": 1,
+        "family": "history_aliasing",
+        "impossible": false,
+        "retry_resets": true,
+        "signals": [
+          "SIGNAL_Y",
+          "SIGNAL_X"
+        ],
+        "status_alias": true,
+        "wrong_signal_resets": true
+      }
+    },
+    {
+      "bundle": "reviewed-native.zip",
+      "bundle_sha256": "cea19bd040204e6fafdb0723665e200a7b6e3d7c54b5a452ee1bb48738851470",
+      "database_member": "private/world.sqlite",
+      "database_sha256": "c80b6dfb7c8561aa86297d3a420301b3061b58ea6390b9a3f87575cf116c769d",
+      "verified_synthetic_effects": 11425,
+      "verified_synthetic_receipts": 11425,
+      "resources": [
+        "R",
+        "replica"
+      ],
+      "state_labels": [
+        "BASE",
+        "A",
+        "B",
+        "NONE"
+      ],
+      "free_text_notes": "all empty",
+      "transitions": "all reproduced by the public ProtocolConfig/World transition function",
+      "config": {
+        "cancel_armed": true,
+        "delay": 2,
+        "family": "history_aliasing",
+        "impossible": false,
+        "retry_resets": true,
+        "signals": [
+          "SIGNAL_X"
+        ],
+        "status_alias": true,
+        "wrong_signal_resets": true
+      }
+    }
+  ],
+  "verified_schema": {
+    "config": [
+      "payload"
+    ],
+    "instances": [
+      "resource",
+      "disposable",
+      "world",
+      "tick",
+      "seq"
+    ],
+    "commands": [
+      "command_id",
+      "payload_hash",
+      "receipt"
+    ],
+    "effects": [
+      "seq",
+      "resource",
+      "command_id",
+      "symbol",
+      "before_state",
+      "after_state",
+      "tick"
+    ],
+    "sqlite_sequence": [
+      "name",
+      "seq"
+    ]
+  }
+}

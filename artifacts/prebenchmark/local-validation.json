@@ -1,0 +1,52 @@
+{
+  "clean_checkout": {
+    "source_hash": "7a4efd368c1f128c39239e6ef9ce39e2af1dc0893485dfd256e8630986bc5d3a",
+    "junit": "clean-checkout.junit.xml",
+    "sha256": "14060a6f400d97498bf3667affb13be3601a0d7f4aa2c4980664cd0ee98cafca",
+    "tests": 76,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "seconds": 520.433,
+    "sanitization": "Only the JUnit hostname was replaced; test results and timing are unchanged."
+  },
+  "final_regressions": {
+    "source_hash": "08f4f8d7ee69c4ad09b5e3758d6ec544416f3d60bc3003b73bab9f827a6e3139",
+    "junit": "final-regressions.junit.xml",
+    "sha256": "c4dceb77104f5ef19c3648cec353aeef375fe8c8c30515405cdbc84e988c5fc8",
+    "tests": 29,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "seconds": 32.051,
+    "sanitization": "Only the JUnit hostname was replaced; test results and timing are unchanged."
+  },
+  "final_change_validation": {
+    "files": [
+      "protocollab/gateway/__init__.py",
+      "protocollab/evaluation/bundle.py",
+      "protocollab/procedures/__init__.py"
+    ],
+    "changes": [
+      "Fail closed on missing decision-basis blobs",
+      "Read reviewed study metrics by exact episode identity",
+      "Stop before revalidating when a control arrives during receipt capture"
+    ],
+    "checks": [
+      "29 final regressions",
+      "Read-only replay and rescore of six reviewed harness episodes"
+    ]
+  },
+  "environment": {
+    "python": "uv-managed CPython 3.12.3",
+    "dependencies": "uv sync --locked --extra local-model",
+    "checkout": "separate source directory and new virtual environment; no reused run prefix",
+    "isolation": "bubblewrap user/PID/network/IPC/UTS namespaces enabled outside the outer tool sandbox"
+  },
+  "github_ci": {
+    "status": "LOCAL_RECORD_IS_NOT_A_GITHUB_CI_RESULT",
+    "reviewed_run": 34936569323,
+    "reviewed_conclusion": "failure"
+  },
+  "research_verdict": "NOT_ESTABLISHED"
+}
