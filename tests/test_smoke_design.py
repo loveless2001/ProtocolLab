@@ -1,6 +1,7 @@
 """The offline design is pinned and cannot masquerade as an executable model lock."""
 
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,7 @@ import yaml
 
 from protocollab.actor import ModelPortConfig
 from protocollab.contracts import digest
-from protocollab.evaluation.manifest import ExperimentManifest, code_fingerprint
+from protocollab.evaluation.manifest import ExperimentManifest
 from protocollab_environment.generator.splits import validate_archive
 
 
@@ -18,7 +19,9 @@ def test_smoke_design_pins_six_episodes_and_requires_real_model_binding():
     lock = json.loads((directory / "design.lock.json").read_text())
     assert lock.pop("design_hash") == digest(lock)
     assert lock["status"] == "DESIGN_LOCKED_MODEL_UNSELECTED" and lock["execution_enabled"] is False
-    assert lock["source_code_hash"] == code_fingerprint(root)
+    # Historical designs bind their retained source, not a moving main branch.
+    with zipfile.ZipFile(directory / f"source-{lock['source_code_hash']}.zip") as archive:
+        assert lock["source_code_hash"] == digest({name: digest(archive.read(name)) for name in archive.namelist()})
     for name, pin in lock["files"].items():
         assert digest((directory / name).read_bytes()) == pin
     pending = yaml.safe_load((directory / "manifest.pending.yaml").read_text())

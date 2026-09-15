@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from protocollab.contracts import digest
-from protocollab.evaluation.bundle import export_bundle, verify_bundle
+from protocollab.evaluation.bundle import export_bundle, rescore_run, verify_bundle
 from protocollab.evaluation.manifest import ExperimentManifest, lock_experiment
 from protocollab.evaluation.metrics import summarize_episode
 from protocollab_environment.scorer import score_episode
@@ -52,3 +52,30 @@ def test_native_bundle_excludes_signing_keys_replays_and_rescores(modeled_runtim
     archive.write_bytes(archive.read_bytes() + b"tampered")
     with pytest.raises(ValueError, match="BUNDLE_HASH_MISMATCH"):
         verify_bundle(archive)
+
+
+def test_study_rescore_keeps_zero_alias_coverage_when_c0_has_no_model(runtime, tmp_path):
+    import sqlite3
+
+    study = tmp_path / "study"
+    episode = study / "fixture-7-C0-G3-clean-0"
+    (episode / "owner").mkdir(parents=True)
+    (episode / "private").mkdir()
+    for connection, path in ((runtime.store.db, episode / "owner/owner.sqlite"),
+                             (runtime.backend.db, episode / "private/world.sqlite")):
+        target = sqlite3.connect(path)
+        connection.backup(target)
+        target.close()
+    events = runtime.store.events()
+    actual = score_episode(episode / "private/world.sqlite", events, runtime.governance.task)
+    actual.update(alias_pair_discrimination=None, alias_prediction_coverage=0.0)
+    row = summarize_episode(events, actual, "C0", "F", "fixture-topology", 7)
+    row.update(governance_condition="G3", case="clean-0")
+    (study / "metrics.jsonl").write_text(json.dumps(row) + "\n")
+    (study / "scenario_archive.json").write_text(json.dumps({"splits": {"development": [{
+        "scenario_id": "fixture", "topology_hash": "fixture-topology", "config": {},
+        "alias_pairs": [{"left": ["SUBMIT_A"], "right": ["SUBMIT_B"], "suffix": ["INSPECT"]}]}]}}))
+    result = rescore_run(episode)
+    assert result["status"] == "MATCH"
+    assert result["metrics"]["alias_prediction_coverage"] == 0.0
+    assert result["metrics"]["alias_pair_discrimination"] is None

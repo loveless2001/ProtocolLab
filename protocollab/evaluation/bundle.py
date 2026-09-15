@@ -58,6 +58,8 @@ def rescore_run(run):
             if active:
                 model = MealyModel(ModelArtifact.model_validate(store.blob(active["hash"])))
                 score.update(score_aliases(model, scenario["config"], scenario["alias_pairs"]))
+            else:
+                score.update(alias_pair_discrimination=None, alias_prediction_coverage=0.0)
         metrics = summarize_episode(events, score, recorded["condition"], recorded["track"],
             recorded["topology_id"], recorded["seed"], recorded.get("scenario_class", "clean"))
         # Study metrics can also contain evaluator-only diagnostics outside the
