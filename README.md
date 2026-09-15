@@ -7,7 +7,8 @@ Mealy model, and executes bounded plans through signed control and dispatch fenc
 The runtime separates observations, beliefs, hypothetical branches, learned
 models, procedures, commitments, authority, and history. A command acknowledgment
 does not count as deployment success. Completion needs two public INSPECT readings
-at least two logical ticks apart, with independent privileged scoring afterward.
+at least `Task.minimum_tick_gap` logical ticks apart (default: two), with no
+newer contradictory reading and independent privileged scoring afterward.
 
 ## Run locally
 
@@ -19,6 +20,7 @@ uv sync --locked
 uv run protocollab demo --output runs/demo --seed 7
 uv run protocollab verify runs/demo
 uv run protocollab replay runs/demo
+uv run protocollab score runs/demo
 ```
 
 The demo uses the **native C3 control**, with no model API calls or GPU work.
@@ -161,3 +163,11 @@ Implementation status and requirement coverage are recorded in
 [IMPLEMENTATION.md](IMPLEMENTATION.md).
 The recorded engineering results and their limits are in
 [docs/VALIDATION.md](docs/VALIDATION.md).
+
+## Fixes before benchmarking
+
+The [review fixes](docs/REVIEW-FIXES.md) describe immutable decision provenance,
+equal live feedback, scoped correction scoring and sandbox startup checks.
+The [sanitized evidence bundles](artifacts/prebenchmark/README.md) make the
+previously referenced smoke runs available for independent replay and scoring.
+See [validation](docs/VALIDATION.md) for separate local, CI and research status.

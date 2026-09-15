@@ -13,9 +13,33 @@ jobs:
           python3 -m pip install uv==0.11.1
           uv python install 3.12.3
           uv sync --locked --extra local-model
+      - name: Check sandbox Python startup
+        run: |
+          set -euo pipefail
+          uv run --no-sync python -m protocollab.isolation | tee sandbox-preflight.json
       - name: Verify
         run: |
           uv run --no-sync ruff check protocollab protocollab_environment tests
           uv run --no-sync pytest --junitxml=acceptance.junit.xml
           uv run --no-sync python scripts/check_acceptance.py acceptance.junit.xml
           python3 design/fixtures/check_design_fixture.py
+      - name: Fresh native replay and scoring
+        run: |
+          uv run --no-sync protocollab demo --output runs/ci-native --seed 7
+          uv run --no-sync protocollab verify runs/ci-native
+          uv run --no-sync protocollab replay runs/ci-native
+          uv run --no-sync protocollab score runs/ci-native > native-score.json
+          uv run --no-sync protocollab bundle runs/ci-native --output native-evidence.zip
+          uv run --no-sync protocollab verify-bundle native-evidence.zip > native-bundle-verification.json
+      - name: Retain validation and sanitized native evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-engineering-evidence
+          path: |
+            sandbox-preflight.json
+            acceptance.junit.xml
+            native-score.json
+            native-evidence.zip
+            native-evidence.zip.sha256
+            native-bundle-verification.json

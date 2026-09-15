@@ -127,7 +127,8 @@ class Governance:
                 "epoch": state["epoch"], "status": state["statuses"][scope],
             }, delegation.principal)
             saved = self.store.set("governance", "control", state, "control.committed", delegation.principal)
-            return {"status": "ACCEPTED", "epoch": state["epoch"], "revision": state["revision"], "fence_seq": saved["seq"]}
+            return {"status": "ACCEPTED", "epoch": state["epoch"], "revision": state["revision"],
+                    "fence_seq": saved["seq"], "event_id": event.event_id}
 
     def is_paused(self, resource):
         state = self.snapshot

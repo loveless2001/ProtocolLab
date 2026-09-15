@@ -8,6 +8,7 @@ import selectors
 import shutil
 import subprocess
 import sys
+import sysconfig
 import time
 from pathlib import Path
 
@@ -19,6 +20,27 @@ class IsolationUnavailable(RuntimeError):
     pass
 
 
+def python_runtime_layout():
+    """Resolve the venv's base runtime without mounting its parent home/cache."""
+    executable = Path(sys.executable).resolve(strict=True)
+    base_executable = Path(sys._base_executable).resolve(strict=True)
+    bases = {Path(sys.base_prefix).resolve(strict=True), Path(sys.base_exec_prefix).resolve(strict=True)}
+    stdlib = Path(sysconfig.get_path("stdlib")).resolve(strict=True)
+    if not any(stdlib.is_relative_to(base) for base in bases):
+        raise IsolationUnavailable("Python standard library is outside its base runtime")
+    if not any(executable.is_relative_to(base) for base in bases | {Path(sys.prefix).resolve()}):
+        raise IsolationUnavailable("Python executable is outside its base runtime and venv")
+    if not any(base_executable.is_relative_to(base) for base in bases):
+        raise IsolationUnavailable("Base executable is outside its base runtime")
+    covered = (Path("/usr"), Path("/lib"), Path("/lib64"))
+    mounts = sorted(str(base) for base in bases if not any(base.is_relative_to(p) for p in covered))
+    if any(base in ("/", "/home", str(Path.home())) for base in mounts):
+        raise IsolationUnavailable("Overbroad Python base runtime mount")
+    return {"executable": sys.executable, "resolved_executable": str(executable),
+            "base_executable": str(base_executable), "base_prefix": sys.base_prefix,
+            "stdlib": str(stdlib), "runtime_mounts": mounts}
+
+
 def sandbox_command(role, state_directory=None):
     if sys.platform != "linux" or not shutil.which("bwrap"):
         raise IsolationUnavailable("Linux bubblewrap is required; no insecure runtime fallback")
@@ -26,6 +48,7 @@ def sandbox_command(role, state_directory=None):
     venv = Path(sys.prefix)
     if venv == Path(sys.base_prefix):
         raise IsolationUnavailable("Run using the pinned project virtual environment")
+    layout = python_runtime_layout()
     command = ["bwrap", "--unshare-user", "--unshare-pid", "--unshare-net", "--unshare-ipc",
                "--unshare-uts", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
                "--uid", str({"learner": 10001, "actor": 10001, "environment": 10002, "monitor": 10003,
@@ -36,6 +59,8 @@ def sandbox_command(role, state_directory=None):
                "--ro-bind", "/lib64", "/lib64", "--proc", "/proc", "--dev", "/dev",
                "--tmpfs", "/tmp", "--dir", "/app", "--ro-bind", str(venv), "/venv",
                "--ro-bind", str(root / "protocollab"), "/app/protocollab", "--chdir", "/app"]
+    for runtime_path in layout["runtime_mounts"]:
+        command += ["--ro-bind", runtime_path, runtime_path]
     if role == "environment":
         command += ["--ro-bind", str(root / "protocollab_environment"), "/app/protocollab_environment"]
     if state_directory is not None:
@@ -67,7 +92,7 @@ class WorkerProcess:
         self.process.stdin.write(json.dumps(packet, allow_nan=False, separators=(",", ":")) + "\n")
         self.process.stdin.flush()
 
-    def receive(self, timeout=120):
+    def receive(self, timeout=120, *, interpret_error=True):
         selector = selectors.DefaultSelector()
         selector.register(self.process.stdout, selectors.EVENT_READ)
         deadline = time.monotonic() + timeout
@@ -88,11 +113,16 @@ class WorkerProcess:
         if not line:
             raise IsolationUnavailable(f"{self.role} exited: {self.process.stderr.read(4000)}")
         packet = json.loads(line)
+        if interpret_error:
+            self._raise_error(packet)
+        return packet
+
+    @staticmethod
+    def _raise_error(packet):
         if packet.get("type") == "error":
             error = {"BudgetExhausted": BudgetExhausted, "QueryInterrupted": QueryInterrupted,
                      "DeterminismViolation": DeterminismViolation}.get(packet.get("error"), RuntimeError)
             raise error(packet["message"])
-        return packet
 
     def request(self, packet, timeout=120):
         self._request_counter += 1
@@ -100,8 +130,11 @@ class WorkerProcess:
         deadline = time.monotonic() + timeout
         self.send({**packet, "_request_id": request_id})
         while True:
-            response = self.receive(max(0, deadline - time.monotonic()))
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"{self.role} response deadline")
+            response = self.receive(max(0, deadline - time.monotonic()), interpret_error=False)
             if response.get("_request_id") == request_id:
+                self._raise_error(response)
                 return response
 
     def close(self):
@@ -208,3 +241,20 @@ def isolated_plan(model, belief, task, allowed=None, limits=None):
         return result
     finally:
         worker.close()
+
+
+def startup_preflight():
+    layout = python_runtime_layout()
+    worker = WorkerProcess("probe")
+    try:
+        result = worker.request({"paths": [], "startup": True}, timeout=20)
+        if result["network"] != "DENIED" or result["private_import"]:
+            raise IsolationUnavailable("Sandbox preflight isolation boundary failed")
+        return {"status": "PASS", "host_python": layout, "sandbox": result,
+                "command": sandbox_command("probe")}
+    finally:
+        worker.close()
+
+
+if __name__ == "__main__":
+    print(json.dumps(startup_preflight(), indent=2))

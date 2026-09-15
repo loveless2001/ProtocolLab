@@ -69,6 +69,16 @@ class ProtectedDependencies(BaseModel):
     task_schema_hash: Hash
 
 
+class DecisionBasis(Contract):
+    kind: Literal["decision.basis"] = "decision.basis"
+    namespace: Id
+    resource_id: Id
+    belief_rev: Rev
+    model_rev: Rev
+    goal_rev: Rev
+    control_epoch: Rev
+
+
 class ActionProposal(Contract):
     kind: Literal["action.proposal"] = "action.proposal"
     proposal_id: Id
@@ -77,6 +87,7 @@ class ActionProposal(Contract):
     resource_id: Id
     operation: Operation
     actor_principal_ref: Id
+    decision_basis_ref: Hash
     belief_rev: Rev
     model_rev: Rev
     goal_rev: Rev
@@ -254,6 +265,8 @@ class ProcedureArtifact(Contract):
     model_hash: Hash
     resource_binding: Literal["task_resource"] = "task_resource"
     goal_artifact: Artifact
+    goal_revision: Rev = 0
+    minimum_tick_gap: Annotated[int, Field(ge=2)] = 2
     clock_contract: Literal["live_command_then_tick/v1"] = "live_command_then_tick/v1"
     entry_node: StateId
     max_steps: Annotated[int, Field(ge=1, le=32)]

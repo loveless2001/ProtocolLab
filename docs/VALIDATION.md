@@ -1,23 +1,90 @@
 # Engineering validation
 
+## Pre-benchmark fixes: local validation
+
+Review basis: `c8e5a150`. The fixes are described in
+[REVIEW-FIXES.md](REVIEW-FIXES.md).
+
+A separate source checkout, a new virtual environment and uv-managed Python
+3.12.3 passed **76 tests in 520.46 seconds**, with **zero failures, errors or
+skips**. All **42 acceptance IDs** passed. The suite generated its own fresh
+public-query prefix. It included real bubblewrap isolation and the optional
+local-model test. Ruff, compilation, schema export and the design fixture passed.
+
+After three final changes (missing-basis rejection, historical harness metric
+lookup and a control during procedure receipt capture), **29 targeted tests
+passed in 32.21 seconds**. The reviewed six-episode
+harness also replayed and rescored through the final lookup code. These tests
+overlap the full suite and add one new procedure race case; they are not 29
+additional independent acceptance cases.
+The [machine-readable record](../artifacts/prebenchmark/local-validation.json)
+records both source hashes and JUnit hashes rather than relabeling the earlier
+full suite as a run of the final code.
+
+- [Full clean-checkout JUnit](../artifacts/prebenchmark/clean-checkout.junit.xml)
+- [Final regression JUnit](../artifacts/prebenchmark/final-regressions.junit.xml)
+- [Acceptance matrix result](../artifacts/prebenchmark/acceptance-report.json)
+- [Managed-Python failure reproduction and fixed preflight](../artifacts/prebenchmark/managed-python-preflight.json)
+- [Sanitized smoke-run bundles](../artifacts/prebenchmark/README.md)
+
+## Fresh native result for the final code
+
+The [fresh bundle](../artifacts/prebenchmark/fresh-native.zip) records an isolated
+C3/G3/Track F run with **ACTIVE / SUCCESS**, 10/10 predicted transitions, zero
+policy violations, zero false confirmations and zero model calls. Its
+[verification](../artifacts/prebenchmark/fresh-native-bundle-verification.json)
+replays the live trace and returns **MATCH** when recomputing metrics from the
+retained simulator effects, with zero world actions. The final source hash is
+`08f4f8d7ee69c4ad09b5e3758d6ec544416f3d60bc3003b73bab9f827a6e3139`.
+
+The run consumed 9,578 learning symbols, 308 admission symbols and 1,517 resets,
+within the declared calibrated caps. Its recorded wall time of 207.45 seconds
+is an engineering smoke measurement, not a performance benchmark.
+The [source snapshot](../artifacts/prebenchmark/validation-source.zip) also
+retains the final tests and workflow for independent clean-checkout validation.
+
+## GitHub CI
+
+[Reviewed run 34936569323](https://github.com/loveless2001/ProtocolLab/actions/runs/34936569323)
+failed: 44 tests passed, one failed and four errored on sandbox startup. This
+contradicts any claim that the reviewed commit had clean CI. Its
+[sanitized diagnostic record](../artifacts/prebenchmark/reviewed-ci.json) is
+separate from the local results above.
+
+The updated workflow runs the sandbox preflight, the full suite, acceptance
+mapping, a fresh native run, replay, rescore and bundle verification. It uploads
+sanitized native evidence and JUnit results. Use the check on the **fix commit**
+in [GitHub Actions](https://github.com/loveless2001/ProtocolLab/actions/workflows/ci.yml)
+for the hosted CI verdict; local results are not a substitute for that check.
+
+## Research status and benchmark gate
+
+H1–H5, comparative LLM benefit and confirmatory thresholds remain **unestablished**.
+These are engineering checks and native simulator runs. No paid LLM comparison,
+GPU experiment or confirmatory evaluation was performed. The benchmark gate
+requires passing hosted CI plus the fresh native replay/scoring evidence.
+
+## Historical local validation for the reviewed code
+
 This record concerns the implementation of ProtocolLab v0.1. Engineering tests
 do not establish H1–H5, comparative LLM benefit, or the confirmatory thresholds.
 
-On 2026-09-15, the full suite passed **49 tests in 394.23 seconds**, with zero
+The reviewed local record from 2026-09-15 reports that the suite passed **49 tests in 394.23 seconds**, with zero
 failures, errors or skips. All **42 acceptance IDs** passed. Ruff, compilation,
 schema export and the unchanged design fixture checks also passed.
 The [machine-readable validation record](../artifacts/validation.json) binds
-these results to the current source hash and installed package versions.
+these historical results to source hash `222b91c2...` and installed package versions.
+It is not a validation record for the current fixes.
 
 ## Evidence
 
 - [Acceptance results](../artifacts/acceptance-report.json) map the 42 Appendix D
   requirements to passing, non-skipped cases in the
   [complete JUnit result](../artifacts/acceptance.junit.xml).
-- [Native run](../runs/final-smoke/report.md): a fresh isolated C3/G3/Track F
+- [Native run bundle](../artifacts/prebenchmark/reviewed-native.zip): a fresh isolated C3/G3/Track F
   run with public-query learning, fresh admission, planning, live execution,
   independent monitoring, checkpoint and raw traces.
-- [Paired harness run](../runs/final-harness-smoke/report.json): one engineering
+- [Paired harness bundle](../artifacts/prebenchmark/reviewed-harness.zip): one engineering
   topology, C4 diagnostic control, G0/G3, clean and valid/invalid pause cases.
   All six suffixes completed without harness failures. The two accepted pauses
   are recorded as constrained partial progress, not capability failures.
@@ -29,7 +96,7 @@ implementation suite adds real namespace boundaries, public L* learning,
 cryptographic controls, dispatch races, interruptions, persistent deduplication,
 restart, stateful governance, transport timing, and model-port checks.
 
-The final suite reuses the explicitly retained public-query prefix in
+The reviewed local suite reused the explicitly retained public-query prefix in
 `runs/acceptance-prefix` for four isolated suffix tests. The direct learning test
 and `runs/final-smoke` independently run the learner against fresh environments.
 The older prefix is declared reused engineering evidence, not a new sealed result.

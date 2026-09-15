@@ -1,0 +1,10 @@
+{
+  "commit": "c8e5a150bf38770e009e8b4f47728991289b719c",
+  "run_id": 34936569323,
+  "url": "https://github.com/loveless2001/ProtocolLab/actions/runs/34936569323",
+  "conclusion": "failure",
+  "suite": {"passed": 44, "failed": 1, "errors": 4},
+  "python_installation": "uv-managed CPython 3.12.3",
+  "startup_error": "bwrap: execvp /venv/bin/python: No such file or directory",
+  "limit": "The reviewed log did not record the fully resolved interpreter or stdlib path. The separate managed-Python preflight reproduces the failure and verifies the fix."
+}

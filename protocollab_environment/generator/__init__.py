@@ -91,8 +91,8 @@ def reachable(config):
     return histories
 
 
-def solve(config, artifact="A", max_turns=80, initial=None, allowed=None):
-    # Completion requires two observations with >=2 intervening logical ticks.
+def solve(config, artifact="A", max_turns=80, initial=None, allowed=None, minimum_tick_gap=2):
+    from protocollab.planning import evidence_step
     initial = initial or World()
     start = (initial, -1, 0)
     queue = deque([(start, [])])
@@ -105,16 +105,8 @@ def solve(config, artifact="A", max_turns=80, initial=None, allowed=None):
             continue
         for command in (*(ALPHABET[:-1] if allowed is None else allowed), "WAIT"):
             after, output = (state, None) if command == "WAIT" else transition(config, state, command)
-            next_age, next_count = age, count
-            if command == "INSPECT":
-                if output == f"INSPECT:{artifact}:HEALTHY":
-                    if count == 0:
-                        next_count, next_age = 1, 0
-                    elif age >= 2:
-                        next_count = 2
+            next_age, next_count = evidence_step(age, count, command, output, artifact, minimum_tick_gap)
             after, _ = transition(config, after, "TICK")
-            if next_age >= 0:
-                next_age = min(2, next_age + 1)
             key = (after, next_age, next_count)
             if key not in seen:
                 seen.add(key)

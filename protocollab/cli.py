@@ -57,6 +57,13 @@ def main():
     control.add_argument("--resolution", choices=["UPHOLD", "LIFT", "NARROW", "DENY"])
     replay = commands.add_parser("replay", help="Replay retained public traces against the active model without world actions")
     replay.add_argument("run")
+    score = commands.add_parser("score", help="Recompute metrics from retained owner and simulator evidence")
+    score.add_argument("run")
+    bundle = commands.add_parser("bundle", help="Export a sanitized, hash-pinned native evidence ZIP")
+    bundle.add_argument("run")
+    bundle.add_argument("--output", required=True)
+    bundle_verify = commands.add_parser("verify-bundle", help="Verify, replay and rescore an evidence ZIP")
+    bundle_verify.add_argument("archive")
     recover = commands.add_parser("recover", help="Restart the owner, verify hashes, reconcile and stale outstanding plans")
     recover.add_argument("run")
     report = commands.add_parser("report", help="Render a Markdown report from retained episode metrics")
@@ -65,7 +72,7 @@ def main():
     root = Path(__file__).resolve().parent.parent
     if args.command == "schema":
         from protocollab import contracts
-        names = ("ActionProposal", "ControlEvent", "ObservationRecord", "PredictionRecord", "ModelArtifact", "ProcedureArtifact", "AdmissionReport")
+        names = ("DecisionBasis", "ActionProposal", "ControlEvent", "ObservationRecord", "PredictionRecord", "ModelArtifact", "ProcedureArtifact", "AdmissionReport")
         definitions = {name: getattr(contracts, name).model_json_schema() for name in names}
         destination = Path(args.output)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -131,6 +138,18 @@ def main():
     elif args.command == "replay":
         from protocollab.evaluation.replay import replay_run
         print(json.dumps(replay_run(args.run), indent=2))
+    elif args.command == "score":
+        from protocollab.evaluation.bundle import rescore_run
+        result = rescore_run(args.run)
+        print(json.dumps(result, indent=2))
+        if result["status"] != "MATCH":
+            raise SystemExit(1)
+    elif args.command == "bundle":
+        from protocollab.evaluation.bundle import export_bundle
+        print(json.dumps(export_bundle(args.run, args.output), indent=2))
+    elif args.command == "verify-bundle":
+        from protocollab.evaluation.bundle import verify_bundle
+        print(json.dumps(verify_bundle(args.archive), indent=2))
     elif args.command == "report":
         from protocollab.evaluation.report import render_episode_report
         print(render_episode_report(args.run))

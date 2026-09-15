@@ -109,6 +109,21 @@ def probe():
     import socket
     from pathlib import Path
     request = receive()
+    startup = None
+    if request.get("startup"):
+        import encodings
+        import sqlite3
+        import ssl
+        import sysconfig
+
+        import aalpy
+        import cryptography
+        import pydantic
+        startup = {"executable": sys.executable, "resolved_executable": str(Path(sys.executable).resolve()),
+                   "base_prefix": sys.base_prefix, "stdlib": sysconfig.get_path("stdlib"),
+                   "encodings": encodings.__file__, "sqlite": sqlite3.sqlite_version,
+                   "ssl": ssl.OPENSSL_VERSION, "aalpy": aalpy.__file__,
+                   "pydantic": pydantic.__version__, "cryptography": cryptography.__version__}
     paths = {}
     for path in request.get("paths", []):
         try:
@@ -124,6 +139,7 @@ def probe():
         network = "DENIED"
     send({"type": "result", "uid": os.getuid(), "pid": os.getpid(), "paths": paths,
           "private_import": importlib.util.find_spec("protocollab_environment") is not None,
+          "startup": startup,
           "network": network, "environment_keys": sorted(os.environ)})
 
 
