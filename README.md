@@ -157,7 +157,6 @@ in a Linux session where bubblewrap is allowed; the isolation checks do not sile
 
 The unchanged supplied package is under `design/`. The implementation follows
 the explicit ProtocolLab design, informed by the local Pete and VWMA references.
-The referenced `correctable_agency.pdf` was not present in the supplied directory.
 Implementation status and requirement coverage are recorded in
 [IMPLEMENTATION.md](IMPLEMENTATION.md).
 The recorded engineering results and their limits are in
