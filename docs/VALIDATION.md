@@ -71,9 +71,13 @@ for the hosted CI verdict; local results are not a substitute for that check.
 ## Research status and benchmark gate
 
 H1–H5, comparative LLM benefit and confirmatory thresholds remain **unestablished**.
-These are engineering checks and native simulator runs. No paid LLM comparison,
-GPU experiment or confirmatory evaluation was performed. The benchmark gate
-requires passing hosted CI plus the fresh native replay/scoring evidence.
+These are engineering checks and native simulator runs. As part of historical validation scope
+for the initial v0.1 release, no paid LLM comparison, GPU experiment or confirmatory evaluation
+was performed. The subsequent local engineering diagnostic on one development topology—the
+[bounded Qwen3.5-4B actor smoke](../experiments/actor-smoke/QWEN35-4B.md)—revealed interface and
+budgeting limits without completing eligible tasks. Broader model/seed comparisons and confirmatory
+benchmarks remain strictly gated on resolving actor interface diagnostics and passing full regression suites.
+The benchmark gate requires passing hosted CI plus the fresh native replay/scoring evidence.
 
 ## Historical local validation for the reviewed code
 
@@ -159,8 +163,12 @@ replays actual observations rather than clearing their inferred history.
 - The actual optional CPU inference worker is tested with a locally constructed
   tiny **untrained** Safetensors checkpoint. This checks immutable weights,
   token accounting and the inference path; it supplies no task-performance score.
-  API accounting uses a controlled response fixture. No pretrained checkpoint,
-  paid API experiment, GPU job, or confirmatory study was run.
+  API accounting uses a controlled response fixture. In the historical validation scope
+  of the initial implementation, no pretrained checkpoint, paid API experiment, GPU job,
+  or confirmatory study was run; the subsequent bounded local GPU smoke
+  ([Qwen3.5-4B actor smoke](../experiments/actor-smoke/QWEN35-4B.md)) is retained as an engineering
+  diagnostic preserving the distinction between execution-source (`d537d32c...`) and
+  rescoring-source (`85998ba9...`) versions.
 - C4 uses privileged evaluator state and is explicitly non-deployable. Its paired
   smoke cases validate harness/report behavior, not learned-model capability.
   Native planning also voluntarily honors pause in G0; a separate broker test

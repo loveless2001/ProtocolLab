@@ -276,8 +276,10 @@ class Runtime:
                 observations = [self.capture.read_observation(ref) for ref in self.belief.snapshot.observation_refs]
                 self.belief.rebase(model, observations, self.belief.snapshot.complete_history)
             state = self.governance.snapshot
+            if state["statuses"]["agent_all"] == "RECOVERY_REQUIRED":
+                state["statuses"]["agent_all"] = "RUNNING"
             state["epoch"] += 1
-            self.store.set("governance", "control", state, "recovery.revalidated")
+            self.store.set("governance", "control", state, "recovery.revalidated", source="recovery")
             self.store.db.execute("UPDATE actions SET status='STALE' WHERE status='READY'")
             initialized = self.store.get("runtime", "initialized")
             initialized["live_turns"] = self.store.db.execute("SELECT COUNT(*) FROM clock_actions WHERE status='ACKNOWLEDGED'").fetchone()[0]

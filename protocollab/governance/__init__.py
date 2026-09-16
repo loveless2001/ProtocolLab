@@ -166,13 +166,13 @@ class Governance:
     def monitor_health(self, healthy):
         state = self.snapshot
         state["monitor_healthy"] = healthy
-        self.store.set("governance", "control", state, "monitor.health")
+        self.store.set("governance", "control", state, "monitor.health", source="governance")
 
     def recovery_required(self, reason):
         state = self.snapshot
         state["statuses"]["agent_all"] = "RECOVERY_REQUIRED"
         state["epoch"] += 1
-        self.store.set("governance", "control", state, "recovery.required")
+        self.store.set("governance", "control", state, "recovery.required", source="governance")
         self.store.append("governance", "recovery.reason", {"reason": reason})
 
     def reject_protected_update(self, kind, payload, principal="actor"):
