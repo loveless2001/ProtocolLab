@@ -7,10 +7,11 @@ The toy gateway below has no cryptography, persistence, IPC, or security isolati
 Run: python fixtures/check_design_fixture.py
 """
 from __future__ import annotations
+
+import json
 from copy import deepcopy
 from dataclasses import dataclass
 from itertools import product
-import json
 from pathlib import Path
 
 ALPHABET = ('SUBMIT_A','SUBMIT_B','SIGNAL_X','SIGNAL_Y','CANCEL','STATUS','INSPECT','TICK')

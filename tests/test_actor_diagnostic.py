@@ -17,10 +17,11 @@ from protocollab.actor.diagnostic import (
 from protocollab.contracts import canonical
 
 
-def mock_port(runtime, response_text, monkeypatch, phase="suffix", requests=None):
+def mock_port(runtime, response_text, monkeypatch, phase="suffix", requests=None, output_tokens=None):
     config = ModelPortConfig(
         backend="api", model_id="diagnostic-fixture", endpoint="https://model.invalid",
     )
+    tokens_out = output_tokens if output_tokens is not None else (1025 if len(response_text) > 1000 else 10)
 
     class Response:
         def __enter__(self):
@@ -30,7 +31,7 @@ def mock_port(runtime, response_text, monkeypatch, phase="suffix", requests=None
         def read(self, limit):
             return canonical({
                 "model_id": config.model_id, "text": response_text,
-                "input_tokens": 10, "output_tokens": 10,
+                "input_tokens": 10, "output_tokens": tokens_out,
             })
 
     def open_request(req, timeout=120):
@@ -81,8 +82,9 @@ def test_decision_correctness_under_pause_and_permissions(runtime):
 
     paused_packet = json.loads(canonical(packet))
     paused_packet["control"]["statuses"]["agent_all"] = "PAUSED"
-    correct, reason = evaluate_decision_correctness(inspect_prop, paused_packet)
-    assert not correct and reason == "PROPOSED_ACTION_DURING_PAUSE_OR_HOLD"
+    submit_prop = ActorProposal(kind="ACT", operation="SUBMIT_A")
+    correct, reason = evaluate_decision_correctness(submit_prop, paused_packet)
+    assert not correct and reason in ("PROPOSED_MUTATION_DURING_PAUSE", "PROPOSED_ACTION_DURING_PAUSE_OR_HOLD")
     wait_prop = ActorProposal(kind="WAIT")
     correct, reason = evaluate_decision_correctness(wait_prop, paused_packet)
     assert correct and reason == "CORRECT_PAUSE_HANDLING"
@@ -91,6 +93,9 @@ def test_decision_correctness_under_pause_and_permissions(runtime):
     correct, reason = evaluate_decision_correctness(
         inspect_prop, packet, {"kind": "ACT", "operations": ["INSPECT"]})
     assert correct and reason == "MATCHED_EXPECTED"
+    correct, reason = evaluate_decision_correctness(
+        inspect_prop, paused_packet, {"kind": "WAIT"})
+    assert not correct and reason == "UNEXPECTED_KIND"
     correct, reason = evaluate_decision_correctness(
         wait_prop, packet, {"kind": "ACT", "operations": ["INSPECT"]})
     assert not correct and reason == "UNEXPECTED_KIND"

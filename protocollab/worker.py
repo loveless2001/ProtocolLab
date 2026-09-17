@@ -144,15 +144,28 @@ def probe():
 
 
 def actor():
-    from protocollab.actor import parse_proposal
+    from protocollab.actor import extract_channels, parse_proposal
     while True:
         request = receive()
         if request["op"] == "parse":
             try:
-                result = parse_proposal(request["text"]).model_dump()
-            except ValueError as exc:
-                send({"type": "result", "proposal_error": type(exc).__name__})
-                continue
+                raw_text, reasoning, payload, policy = extract_channels(request["text"])
+                proposal = parse_proposal(payload)
+                send({
+                    "type": "result",
+                    "result": proposal.model_dump(),
+                    "reasoning": reasoning,
+                    "final_payload": payload,
+                    "extraction_policy": policy,
+                    "validation_outcome": "VALID",
+                })
+            except Exception as exc:
+                send({
+                    "type": "result",
+                    "proposal_error": type(exc).__name__,
+                    "validation_outcome": type(exc).__name__,
+                })
+            continue
         elif request["op"] == "plan":
             from protocollab.contracts import BeliefSnapshot, ModelArtifact, Task
             from protocollab.modeling import MealyModel

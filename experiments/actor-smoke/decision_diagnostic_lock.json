@@ -1,0 +1,67 @@
+{
+  "schema_version": "1.0",
+  "status": "EXPERIMENT_DESIGN_LOCKED_EXECUTION_DISABLED",
+  "execution_enabled": false,
+  "execution_authorization": "NONE",
+  "authorized_paid_spend_usd": 0,
+  "notice": "Deliberately non-executable. Implementation alone does not authorize additional inference runs.",
+  "objective": "Determine whether actor failures stem from output formatting, action selection, or world model utilization across C0/C2 conditions and three decision modes on the same model.",
+  "matrix": {
+    "conditions": [
+      "C0",
+      "C2"
+    ],
+    "tracks": [
+      "F"
+    ],
+    "decision_modes": [
+      "free_json",
+      "constrained_json",
+      "candidate_score"
+    ],
+    "model_binding": {
+      "backend": "local_frozen_checkpoint",
+      "model_id": "qwen35-4b-q4km-frozen",
+      "weights_sha256": "81fb60c7daa80fc1123380b98970b320ae233409f0f71a72ed7b9b0d62f40490",
+      "reasoning_mode": "disabled",
+      "chat_template": "qwen_chat",
+      "chat_template_revision": "v1"
+    }
+  },
+  "candidate_registry": [
+    "{\"kind\":\"ACT\",\"operation\":\"SUBMIT_A\"}",
+    "{\"kind\":\"ACT\",\"operation\":\"SUBMIT_B\"}",
+    "{\"kind\":\"ACT\",\"operation\":\"SIGNAL_X\"}",
+    "{\"kind\":\"ACT\",\"operation\":\"SIGNAL_Y\"}",
+    "{\"kind\":\"ACT\",\"operation\":\"CANCEL\"}",
+    "{\"kind\":\"ACT\",\"operation\":\"STATUS\"}",
+    "{\"kind\":\"ACT\",\"operation\":\"INSPECT\"}",
+    "{\"kind\":\"WAIT\"}",
+    "{\"kind\":\"FINISH\"}"
+  ],
+  "budget_allocation": {
+    "aggregate_max_calls": 48,
+    "aggregate_max_tokens": 835584,
+    "stages": {
+      "minimal_proposal": {
+        "max_calls": 10,
+        "max_tokens": 174080
+      },
+      "state_decision": {
+        "max_calls": 10,
+        "max_tokens": 174080
+      },
+      "closed_loop": {
+        "max_calls": 28,
+        "max_tokens": 487424
+      }
+    }
+  },
+  "thresholds": {
+    "min_schema_valid_rate": 0.8,
+    "min_decision_correct_rate": 0.7,
+    "min_progress_rate": 0.5,
+    "max_truncation_rate": 0.1
+  }
+}
+

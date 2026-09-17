@@ -11,7 +11,7 @@ import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -42,30 +42,49 @@ class ActorProposal(BaseModel):
         return self
 
 
-def proposal_text(text):
-    """Drop think-channel markup. Does not repair invalid JSON."""
+REASONING_POLICY_ENVELOPE_V1 = "reasoning_envelope/v1"
+REASONING_POLICY_EXPLICIT_FIELDS = "explicit_adapter_fields/v1"
+
+
+def extract_channels(
+    text: str | bytes,
+    *,
+    explicit_reasoning: str | None = None,
+    explicit_payload: str | None = None,
+) -> tuple[str, str | None, str, str]:
+    """Extract reasoning and final payload channels without rewriting the final payload.
+
+    Returns:
+        (raw_text, reasoning, final_payload, extraction_policy_version)
+    """
     raw = text if isinstance(text, str) else text.decode("utf-8")
-    lower = raw.lower()
-    pieces = []
-    pos = 0
-    if "</think>" in lower and "<think>" not in lower[:lower.find("</think>")]:
-        raw = "<think>\n" + raw
-        lower = "<think>\n" + lower
-    while True:
-        start = lower.find("<think>", pos)
-        if start == -1:
-            pieces.append(raw[pos:])
-            break
-        pieces.append(raw[pos:start])
-        end = lower.find("</think>", start)
-        if end == -1:
+    if explicit_payload is not None:
+        return raw, explicit_reasoning, explicit_payload, REASONING_POLICY_EXPLICIT_FIELDS
+
+    stripped = raw.lstrip()
+    lower_stripped = stripped.lower()
+    if lower_stripped.startswith("<think>"):
+        end_idx = lower_stripped.find("</think>")
+        if end_idx == -1:
             raise ValueError("THINKING_INCOMPLETE")
-        pos = end + len("</think>")
-    return "".join(pieces).strip()
+        reasoning = stripped[len("<think>"):end_idx]
+        final_payload = stripped[end_idx + len("</think>"):].strip()
+        return raw, reasoning, final_payload, REASONING_POLICY_ENVELOPE_V1
+    else:
+        if lower_stripped.startswith("</think>"):
+            raise ValueError("MALFORMED_REASONING_ENVELOPE")
+        return raw, None, raw.strip(), REASONING_POLICY_ENVELOPE_V1
 
 
-def parse_proposal(text):
-    return ActorProposal.model_validate(strict_json(proposal_text(text)))
+def proposal_text(text: str | bytes) -> str:
+    """Extract final payload text without rewriting or tag stripping."""
+    _, _, payload, _ = extract_channels(text)
+    return payload
+
+
+def parse_proposal(text: str | bytes) -> ActorProposal:
+    payload = proposal_text(text)
+    return ActorProposal.model_validate(strict_json(payload))
 
 
 CHECKLIST = (
@@ -283,7 +302,7 @@ class FrozenModelPort:
             if any(actual[key] != getattr(config, key) for key in actual):
                 raise ValueError("CHECKPOINT_HASH_MISMATCH")
 
-    def generate(self, packet, seed=0, prompt_override=None):
+    def generate(self, packet, seed=0, prompt_override=None, decision_mode="free_json", candidates=None):
         self.last_request_seq = None
         validate_packet(packet)
         usage = self.store.get("model_port", self.phase)
@@ -326,6 +345,10 @@ class FrozenModelPort:
         request = {"model_id": self.config.model_id, "prompt": prompt, "seed": seed,
                    "max_input_tokens": self.config.max_input_tokens,
                    "max_output_tokens": self.config.max_output_tokens}
+        if decision_mode != "free_json":
+            request["decision_mode"] = decision_mode
+        if candidates is not None:
+            request["candidates"] = candidates
         reservation = self.config.max_input_tokens + self.config.max_output_tokens
         if self.input_tokens + self.output_tokens + usage["reserved_tokens"] + reservation > self.total_tokens:
             raise BudgetExhausted("total_model_token_reservation")
@@ -411,6 +434,93 @@ class FrozenModelPort:
                 "reason": type(exc).__name__, "usage_status": "unknown_if_provider_failed_after_send"})
             raise
 
+    def score_candidates(self, prompt: str, candidates: list[str], seed: int = 0) -> dict[str, Any]:
+        self.last_request_seq = None
+        usage = self.store.get("model_port", self.phase)
+        self.calls, self.input_tokens, self.output_tokens = usage["calls"], usage["input_tokens"], usage["output_tokens"]
+        if self.calls >= self.max_calls or self.input_tokens + self.output_tokens + usage["reserved_tokens"] >= self.total_tokens:
+            raise BudgetExhausted("llm_calls_or_tokens")
+
+        request = {
+            "model_id": self.config.model_id,
+            "prompt": prompt,
+            "seed": seed,
+            "candidates": candidates,
+            "op": "score_candidates",
+            "max_input_tokens": self.config.max_input_tokens,
+            "max_output_tokens": self.config.max_output_tokens,
+        }
+        reservation = self.config.max_input_tokens + self.config.max_output_tokens
+        if self.input_tokens + self.output_tokens + usage["reserved_tokens"] + reservation > self.total_tokens:
+            raise BudgetExhausted("total_model_token_reservation")
+
+        self.calls += 1
+        usage["calls"] = self.calls
+        usage["reserved_tokens"] += reservation
+        self.store.set("model_port", self.phase, usage, "llm.call_reserved")
+        started, called_at = time.monotonic(), datetime.now(timezone.utc).isoformat()
+        request_hash = self.store.put_blob(request)
+        self.last_request_seq = self.store.append("model_port", "llm.requested", {
+            "request_hash": request_hash, "called_at": called_at, "claims": []})["seq"]
+
+        try:
+            if self.config.backend == "local_frozen_checkpoint":
+                process = subprocess.run(
+                    [sys.executable, "-m", "protocollab.actor.local_worker"],
+                    input=json.dumps({**request, "checkpoint": self.config.checkpoint}),
+                    text=True, capture_output=True, timeout=self.config.deadline_seconds,
+                    env={**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"},
+                )
+                if process.returncode:
+                    raise RuntimeError("LOCAL_MODEL_FAILED: " + process.stderr[-2000:])
+                lines = (process.stdout or "").splitlines()
+                result = json.loads(lines[-1]) if lines else {}
+            elif self.config.backend == "api":
+                headers = {"Content-Type": "application/json"}
+                if self.config.credential_env:
+                    headers["Authorization"] = "Bearer " + os.environ[self.config.credential_env]
+                req = urllib.request.Request(self.config.endpoint, data=canonical(request), headers=headers)
+                with urllib.request.urlopen(req, timeout=self.config.deadline_seconds) as response:
+                    result = json.loads(response.read(2 * 1024 * 1024))
+            else:
+                raise ValueError(f"UNSUPPORTED_BACKEND: {self.config.backend}")
+
+            if result.get("error"):
+                raise ValueError(result["error"])
+
+            for key in ("input_tokens", "output_tokens"):
+                if type(result.get(key)) is not int or result[key] < 0:
+                    raise ValueError("INVALID_TOKEN_USAGE")
+
+            self.input_tokens += result["input_tokens"]
+            self.output_tokens += result["output_tokens"]
+            usage.update(
+                input_tokens=self.input_tokens,
+                output_tokens=self.output_tokens,
+                reserved_tokens=usage["reserved_tokens"] - reservation,
+            )
+            self.store.set("model_port", self.phase, usage, "llm.usage_recorded")
+            self.store.append("model_port", "llm.completed", {
+                "request_hash": request_hash,
+                "request_seq": self.last_request_seq,
+                "response_hash": self.store.put_blob(result),
+                "model_id": result.get("model_id", self.config.model_id),
+                "called_at": called_at,
+                "elapsed_ms": int((time.monotonic() - started) * 1000),
+                "input_tokens": result["input_tokens"],
+                "output_tokens": result["output_tokens"],
+                "reproducibility": "local_hash_pinned" if self.config.backend == "local_frozen_checkpoint" else "provider_fingerprint_limited",
+            })
+            return result
+        except Exception as exc:
+            self.store.append("model_port", "llm.failed", {
+                "request_hash": request_hash,
+                "request_seq": self.last_request_seq,
+                "reason": type(exc).__name__,
+                "usage_status": "unknown_if_provider_failed_after_send",
+            })
+            raise
+
 
 class IsolatedActor:
     def __init__(self, model_port):
@@ -427,15 +537,25 @@ class IsolatedActor:
 
     def propose(self, packet, seed=0):
         text = self.port.generate(packet, seed)
-        refs = {"request_seq": self.port.last_request_seq,
-                "text_ref": self.port.store.put_blob(text.encode())}
+        raw_text, reasoning, final_payload, policy = extract_channels(text)
+        refs = {
+            "request_seq": self.port.last_request_seq,
+            "text_ref": self.port.store.put_blob(raw_text.encode()),
+            "final_payload_ref": self.port.store.put_blob(final_payload.encode()),
+            "reasoning_ref": self.port.store.put_blob(reasoning.encode()) if reasoning is not None else None,
+            "extraction_policy": policy,
+        }
         self.port.store.append("actor", "actor.raw_proposal", refs)
         response = self.worker.request({"op": "parse", "text": text})
         if response.get("proposal_error"):
-            self.port.store.append("actor", "actor.proposal_rejected", refs)
+            self.port.store.append("actor", "actor.proposal_rejected", {
+                **refs, "validation_outcome": response.get("proposal_error")
+            })
             raise ValueError("INVALID_ACTOR_PROPOSAL")
         proposal = ActorProposal.model_validate(response["result"])
-        self.port.store.append("actor", "actor.proposal_returned", {**refs, **proposal.model_dump()})
+        self.port.store.append("actor", "actor.proposal_returned", {
+            **refs, "validation_outcome": "VALID", **proposal.model_dump()
+        })
         return proposal
 
     def close(self):
