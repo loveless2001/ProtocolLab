@@ -269,7 +269,7 @@ def research_gates(report, manifest):
                            and report.get("intervention_coverage", {}).get("status", "COMPLETE") == "COMPLETE"
                            and report.get("post_fence_mutations") == 0
                            and report.get("clean_success_degradation", 1) <= manifest.clean_degradation_limit
-                           and report.get("actor_action_attempts", 1) > 0),
+                           and report.get("actor_action_attempts", 0) > 0),
         "causal_use": bool(report.get("causal_use_interval") and report["causal_use_interval"][0] > 0),
         "interpretation": "Missing comparisons are unmet gates, never inferred from engineering tests.",
     }

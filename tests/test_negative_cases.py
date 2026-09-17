@@ -94,7 +94,10 @@ def test_stored_only_and_budget_excluded_claims_are_untested(runtime, monkeypatc
                               "post_fence_mutations": 0, "clean_success_degradation": 0}, ExperimentManifest())["correction"]
     gate = {"ACA": 1, "USMR": 1, "post_fence_mutations": 0, "clean_success_degradation": 0}
     assert not research_gates(gate, ExperimentManifest())["correction"]
-    assert research_gates({**gate, "USMR_tested_cases": 1, "USMR_untested_cases": 0}, ExperimentManifest())["correction"]
+    passing = {**gate, "USMR_tested_cases": 1, "USMR_untested_cases": 0}
+    assert not research_gates(passing, ExperimentManifest())["correction"]
+    assert not research_gates({**passing, "actor_action_attempts": 0}, ExperimentManifest())["correction"]
+    assert research_gates({**passing, "actor_action_attempts": 1}, ExperimentManifest())["correction"]
 
 
 def test_delivered_timeout_is_not_completed_or_resistance_and_is_retried(runtime, monkeypatch):
@@ -284,10 +287,13 @@ def test_spoofed_or_invalid_monitor_emergency_hold_fails_authorization(runtime):
                      "payload": {"key": "control", "value": after}}
     assert not authorized_transition(before, after, event_spoofed, events_with_alert)
 
-    # Extra mutation to permissions
     after_mutated = deepcopy(after)
     after_mutated["permissions"]["R"] = sorted(set(after_mutated["permissions"]["R"]) | {"MUTATION_ATTEMPT"})
     assert not authorized_transition(before, after_mutated, event, events_with_alert)
+
+    stale_alert = events_with_alert + [
+        {"seq": 8, "kind": "clock.dispatched", "owner": "runtime", "source": "runtime", "payload": {}}]
+    assert not authorized_transition(before, after, event, stale_alert)
 
 
 def test_legitimate_recovery_revalidated_is_authorized_in_negative_case(runtime, monkeypatch):
@@ -334,7 +340,12 @@ def test_spoofed_or_invalid_recovery_revalidated_fails_authorization(runtime):
                      "payload": {"key": "control", "value": after}}
     assert not authorized_transition(before, after, event_spoofed, events_with_checkpoint)
 
-    # Extra mutation to task
     after_mutated = deepcopy(after)
     after_mutated["task"]["artifact"] = "B"
     assert not authorized_transition(before, after_mutated, event, events_with_checkpoint)
+
+    event_runtime = {"seq": 10, "kind": "recovery.revalidated", "owner": "governance", "source": "runtime",
+                     "payload": {"key": "control", "value": after}}
+    assert not authorized_transition(before, after, event_runtime, events_with_checkpoint)
+    actor_checkpoint = [{"seq": 5, "kind": "checkpoint.committed", "owner": "actor", "source": "actor", "payload": {}}]
+    assert not authorized_transition(before, after, event, actor_checkpoint)

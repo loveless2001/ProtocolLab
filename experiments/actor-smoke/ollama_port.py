@@ -24,10 +24,12 @@ def sha(data):
 SYSTEM = "Use the public ProtocolLab packet and return one JSON proposal matching its schema."
 
 
-def render(prompt):
-    # Exact text-only system/user branch of Qwen3.5's template, thinking disabled.
-    return ("<|im_start|>system\n" + SYSTEM + "<|im_end|>\n<|im_start|>user\n"
-            + prompt.strip() + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n")
+def render(prompt, think=False):
+    prefix = ("<|im_start|>system\n" + SYSTEM + "<|im_end|>\n<|im_start|>user\n"
+              + prompt.strip() + "<|im_end|>\n<|im_start|>assistant\n")
+    if think:
+        return prefix + "<think>\n"
+    return prefix + "<think>\n\n</think>\n\n"
 
 
 def upstream_request(request, lock):
@@ -40,13 +42,14 @@ def upstream_request(request, lock):
             raise ValueError("TOKEN_LIMIT_CHANGED")
     if not isinstance(request["prompt"], str):
         raise ValueError("PROMPT_TYPE")
-    prompt = render(request["prompt"])
+    think = bool(lock.get("think"))
+    prompt = render(request["prompt"], think)
     # Conservative for the pinned byte-level tokenizer, includes all formatting.
     # Reject instead of letting the server drop required feedback or claims.
     if len(prompt.encode()) > lock["max_input_tokens"]:
         raise ValueError("FORMATTED_INPUT_BYTE_BOUND")
     return {"model": lock["ollama_model"], "prompt": prompt, "raw": True,
-            "think": False, "stream": False, "keep_alive": "60m",
+            "think": think, "stream": False, "keep_alive": "60m",
             "options": {**lock["options"], "seed": request["seed"],
                         "num_predict": request["max_output_tokens"]}}
 
@@ -54,15 +57,22 @@ def upstream_request(request, lock):
 def checked_result(result, lock):
     if result.get("model") != lock["ollama_model"] or result.get("done") is not True:
         raise ValueError("UPSTREAM_IDENTITY_OR_COMPLETION")
-    if result.get("thinking"):
+    thinking = result.get("thinking")
+    if thinking and not lock.get("think"):
         raise ValueError("UNEXPECTED_THINKING")
     for key, limit in (("prompt_eval_count", "max_input_tokens"), ("eval_count", "max_output_tokens")):
         if type(result.get(key)) is not int or not 0 <= result[key] <= lock[limit]:
             raise ValueError("UPSTREAM_TOKEN_USAGE")
     if not isinstance(result.get("response"), str):
         raise ValueError("UPSTREAM_RESPONSE_TYPE")
+    text = result["response"]
+    if lock.get("think"):
+        if thinking:
+            text = "<think>\n" + thinking + "\n</think>\n" + text
+        elif not text.strip().startswith("<think>"):
+            text = "<think>\n" + text
     return {"model_id": lock["model_id"], "fingerprint": lock["fingerprint"],
-            "text": result["response"], "input_tokens": result["prompt_eval_count"],
+            "text": text, "input_tokens": result["prompt_eval_count"],
             "output_tokens": result["eval_count"]}
 
 

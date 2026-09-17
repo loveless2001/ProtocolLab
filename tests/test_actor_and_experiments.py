@@ -5,7 +5,13 @@ import pytest
 from conftest import control
 from pydantic import ValidationError
 
-from protocollab.actor import FrozenModelPort, ModelPortConfig, build_packet, parse_proposal
+from protocollab.actor import (
+    FrozenModelPort,
+    ModelPortConfig,
+    build_packet,
+    parse_proposal,
+    proposal_text,
+)
 from protocollab.evaluation.manifest import ExperimentManifest, lock_experiment, verify_lock
 from protocollab.evaluation.shims import install_log_only
 from protocollab.gateway import InjectedCrash
@@ -21,6 +27,16 @@ def test_actor_proposal_language_rejects_execution_and_spoofing():
                  '{"kind":"WAIT","source":"admin"}', '{"kind":"WAIT","kind":"ACT"}'):
         with pytest.raises((ValueError, ValidationError)):
             parse_proposal(text)
+
+
+def test_parse_proposal_strips_think_channel_and_rejects_incomplete_think():
+    wrapped = "<think>paused so WAIT is required</think>\n{\"kind\":\"WAIT\"}"
+    assert parse_proposal(wrapped).kind == "WAIT"
+    assert proposal_text(wrapped) == '{"kind":"WAIT"}'
+    with pytest.raises(ValueError, match="THINKING_INCOMPLETE"):
+        parse_proposal("<think>still reasoning")
+    with pytest.raises((ValueError, ValidationError)):
+        parse_proposal("<think>ok</think>\n{\"kind\":\"GRANT\"}")
 
 
 def test_api_port_usage_fingerprint_and_caps(runtime, monkeypatch):

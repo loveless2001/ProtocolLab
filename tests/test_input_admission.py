@@ -2,6 +2,7 @@
 
 import json
 import urllib.request
+
 import pytest
 
 from protocollab.actor import (
@@ -122,12 +123,14 @@ def test_exact_limit_boundary_admitted_and_exact_plus_one_rejected(runtime, monk
     assert len(sent_requests) == 1
     assert port_exact.calls == 1
 
-    # Verify delivered evidence retained matches what was sent
     events = runtime.store.events()
     delivered_events = [e for e in events if e["kind"] == "llm.input_delivered"]
     assert len(delivered_events) == 1
     evidence = runtime.store.blob(delivered_events[0]["payload"]["input_evidence_hash"])
-    assert evidence["prompt"] == formatted
+    wire_prompt = json.loads(sent_requests[0].data)["prompt"]
+    assert evidence["prompt"] == wire_prompt
+    assert wire_prompt == canonical(packet).decode("utf-8")
+    assert formatted != wire_prompt
 
     # Case 2: Exact limit - 1 byte rejects
     config_under = ModelPortConfig(
@@ -202,6 +205,23 @@ def test_non_ascii_multibyte_utf8_budget_accounting(runtime, monkeypatch):
     assert rejections[0]["payload"]["limit_bytes"] == boundary_limit
 
 
+def test_chatml_omits_qwen_think_tags_and_unknown_template_is_rejected():
+    from pydantic import ValidationError
+    packet_text = '{"kind":"WAIT"}'
+    qwen = ModelPortConfig(
+        backend="api", model_id="test-model", endpoint="https://model.invalid", chat_template="qwen_chat")
+    chatml = ModelPortConfig(
+        backend="api", model_id="test-model", endpoint="https://model.invalid", chat_template="chatml")
+    qwen_text = render_formatted_input(packet_text, qwen)
+    chatml_text = render_formatted_input(packet_text, chatml)
+    assert "<think>" in qwen_text
+    assert "<think>" not in chatml_text
+    assert chatml_text.endswith("<|im_start|>assistant\n")
+    with pytest.raises(ValidationError):
+        ModelPortConfig(
+            backend="api", model_id="test-model", endpoint="https://model.invalid", chat_template="qwen-chat")
+
+
 def test_history_is_trimmed_to_fit_formatted_limit_without_losing_claims_or_feedback(runtime, monkeypatch):
     """History events are trimmed to satisfy formatted limit, but claims and live feedback are retained."""
     sent_requests = []
@@ -256,3 +276,6 @@ def test_history_is_trimmed_to_fit_formatted_limit_without_losing_claims_or_feed
     assert len(sent_packet["incoming_claims"]) == 1
     assert sent_packet["incoming_claims"][0]["text"] == claim_text
     assert sent_packet["live_feedback"]["latest_turn"] is not None
+    delivered = [e for e in runtime.store.events() if e["kind"] == "llm.input_delivered"]
+    evidence = runtime.store.blob(delivered[-1]["payload"]["input_evidence_hash"])
+    assert evidence["prompt"] == sent_data["prompt"]

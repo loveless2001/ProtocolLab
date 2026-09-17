@@ -54,6 +54,37 @@ is an engineering smoke measurement, not a performance benchmark.
 The [source snapshot](../artifacts/prebenchmark/validation-source.zip) also
 retains the final tests and workflow for independent clean-checkout validation.
 
+## Local model actor smoke runs (Qwen3.5-4B)
+
+Three successive engineering smoke runs evaluated the local frozen **Qwen3.5-4B** (Q4_K_M) adapter on the locked six-episode study topology (Track F, G3 governance, conditions C0 and C2 on `scenario-0001`, seed 7). All runs executed on localhost GPU (RTX 3060 Laptop GPU, 6.0 GiB VRAM) via an isolated Ollama instance and audited proxy, incurring **zero paid API spend**.
+
+### 3-Way Comparative Results
+
+| Metric | Run 1: Baseline (2026-09-15)<br>`think: false`, 256 tok | Run 2: Constrained (2026-09-17)<br>`think: true`, 256 tok | Run 3: Generous (2026-09-17)<br>`think: true`, **2048 tok** |
+|---|---:|---:|---:|
+| **Run directory** | `runs/actor-smoke-qwen35-4b-20260915` | `runs/actor-smoke-qwen35-4b-think-20260917` | `runs/actor-smoke-qwen35-4b-think-generous-20260917` |
+| **Input admission bound** | 16,384 bytes | 16,384 bytes | **20,480 bytes (+25% margin)** |
+| **Context window (`num_ctx`)** | 16,640 tokens | 16,640 tokens | **24,576 tokens (24k)** |
+| **Input admission rejections** | 3 (all C2) | 5 (3 in C0, 2 in C2) | **0 (100% admitted)** |
+| **Forwarded inference calls** | 45 | 43 | **48 (100% completed)** |
+| **Total input tokens** | 272,453 | 260,078 | **363,439** |
+| **Total output tokens** | 8,032 | 11,008 | **98,304** |
+| **Tokens per call** | 178.5 avg | 256.0 exact (43/43) | **2,048.0 exact (48/48)** |
+| **Valid proposals returned** | 10 (all C0) | 0 | **0 (thought loops)** |
+| **Schema rejections** | 35 | 43 | **48** |
+| **Task completion (eligible)** | 0/4 | 0/4 | **0/4 (safe fallback to WAIT)** |
+| **ACA (Authenticated Pause)** | 1.0 (2/2) | 1.0 (2/2) | **1.0 (2/2)** |
+| **USMR (Invalid Claims)** | 1.0 (2/2) | 1.0 (2/2) | **1.0 (2/2)** |
+| **Audit verification** | MATCH | MATCH | **MATCH (6/6 episodes)** |
+| **Paid API cost** | $0.00 | $0.00 | **$0.00** |
+
+### Key Findings & Engineering Implications
+
+1. **Input Admission**: In Runs 1 and 2, formatted input packets (~16.4–16.5 KiB) exceeded the conservative 16,384-byte ceiling by 10–95 bytes due to chat template framing. Widening `max_input_tokens` to **20,480 bytes** with a **24,576 context window** completely eliminated all admission failures (**0 rejections across 48 calls**), fitting 100% in GPU VRAM (5,143 MiB / 6,144 MiB).
+2. **Reasoning Loop Saturation**: In Run 3, expanding the output token cap to 2,048 tokens revealed that Qwen3.5-4B under greedy decoding (`temperature: 0`) enters cyclical autoregressive reasoning loops when analyzing dense protocol checklists and schemas. All 48 calls consumed the entire 2,048-token limit without emitting `</think>` or a closing JSON proposal. Exploratory offline testing demonstrated that greedy reasoning loops persist even past 4,096 tokens.
+3. **Protocol Governance & Invariant Enforcement**: Across 98,304 generated tokens of incomplete thoughts, ProtocolLab's isolated proposal parser cleanly rejected all malformed outputs. The runtime gracefully defaulted to `WAIT` turns, strictly preserving all safety guarantees (USMR = 1.0, ACA = 1.0, 0 live primitive actions dispatched, 0 world actions performed by audit).
+4. **Full Regression Suite**: The expanded codebase passed **136 of 136 tests** in 1,079 seconds with zero failures, errors, or regressions.
+
 ## GitHub CI
 
 [Reviewed run 34936569323](https://github.com/loveless2001/ProtocolLab/actions/runs/34936569323)
@@ -73,10 +104,11 @@ for the hosted CI verdict; local results are not a substitute for that check.
 H1–H5, comparative LLM benefit and confirmatory thresholds remain **unestablished**.
 These are engineering checks and native simulator runs. As part of historical validation scope
 for the initial v0.1 release, no paid LLM comparison, GPU experiment or confirmatory evaluation
-was performed. The subsequent local engineering diagnostic on one development topology—the
-[bounded Qwen3.5-4B actor smoke](../experiments/actor-smoke/QWEN35-4B.md)—revealed interface and
-budgeting limits without completing eligible tasks. Broader model/seed comparisons and confirmatory
-benchmarks remain strictly gated on resolving actor interface diagnostics and passing full regression suites.
+was performed. The subsequent local engineering diagnostics on one development topology—the
+[bounded Qwen3.5-4B actor smoke](../experiments/actor-smoke/QWEN35-4B.md) and thinking-mode runs
+(`runs/actor-smoke-qwen35-4b-think-20260917` and `runs/actor-smoke-qwen35-4b-think-generous-20260917`)—revealed
+interface, budgeting, and reasoning-loop limits without completing eligible tasks. Broader model/seed comparisons
+and confirmatory benchmarks remain strictly gated on resolving actor interface diagnostics and passing full regression suites.
 The benchmark gate requires passing hosted CI plus the fresh native replay/scoring evidence.
 
 ## Historical local validation for the reviewed code

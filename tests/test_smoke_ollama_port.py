@@ -101,3 +101,23 @@ def test_timeout_consumes_call_and_mismatched_usage_is_rejected(tmp_path, monkey
                              "prompt_eval_count": 16385, "eval_count": 1}, lock)
     with pytest.raises(ValueError, match="UPSTREAM_IDENTITY"):
         port.checked_result({"model": "different", "done": True}, lock)
+
+
+def test_think_lock_opens_think_channel_and_keeps_thinking_in_text(tmp_path):
+    lock = fixture_lock(tmp_path)
+    lock["think"] = True
+    raw = port.upstream_request(request(lock), lock)
+    assert raw["think"] is True
+    assert raw["prompt"].endswith("<think>\n")
+    assert not raw["prompt"].endswith("<think>\n\n</think>\n\n")
+    checked = port.checked_result({
+        "model": lock["ollama_model"], "done": True,
+        "thinking": "paused, so wait", "response": '{"kind":"WAIT"}',
+        "prompt_eval_count": 10, "eval_count": 8,
+    }, lock)
+    assert checked["text"].startswith("<think>\n")
+    assert '{"kind":"WAIT"}' in checked["text"]
+    with pytest.raises(ValueError, match="UNEXPECTED_THINKING"):
+        port.checked_result({"model": "fixture:pin", "done": True, "thinking": "no",
+                             "response": "{}", "prompt_eval_count": 1, "eval_count": 1},
+                            fixture_lock(tmp_path))

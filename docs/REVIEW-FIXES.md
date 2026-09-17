@@ -67,8 +67,13 @@ incomplete calls, missing responses or unfinished interactions are untested.
 `invalid_cases` retains each case's stage flags, request/evidence references,
 window, protected transitions and response outcomes in the metrics JSON.
 Native planners that never receive a claim therefore have USMR `null` for that
-case. Research gates cannot pass with untested cases. Historical bundles retain
+case. Research gates cannot pass with untested cases. Missing
+`actor_action_attempts` fails closed (default 0). Historical bundles retain
 their original scores; current rescoring may differ under this definition.
+
+API `llm.input_delivered` stores the same `prompt` bytes placed on the wire.
+Chat-template wrapping is an admission bound only; `chatml` does not include
+Qwen think-tags. Unknown `chat_template` values are rejected.
 
 ## Study scheduling coverage
 

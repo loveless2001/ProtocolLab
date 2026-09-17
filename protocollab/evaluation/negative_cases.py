@@ -40,22 +40,25 @@ def authorized_transition(before, after, event, events):
     elif event["kind"] == "monitor.emergency_hold":
         if event.get("owner") != "governance" or event.get("source") != "monitor":
             return False
-        # Triggering evidence: prior alert from monitor or unhealthy monitor state
-        has_alert = any(e for e in events if e["seq"] < event["seq"]
-                        and e.get("owner") == "monitor" and e["kind"] == "monitor.alert")
-        if not has_alert and before["monitor_healthy"]:
+        preceding = next((e for e in reversed(events) if e["seq"] < event["seq"]), None)
+        from_health = (preceding is not None and preceding["kind"] == "monitor.health"
+                       and preceding.get("owner") == "governance" and not before["monitor_healthy"])
+        from_alert = (preceding is not None and preceding["kind"] == "monitor.alert"
+                      and preceding.get("owner") == "monitor")
+        if not from_health and not from_alert:
             return False
         if before["statuses"].get("agent_all") == "HOLD":
             return False
         expected["statuses"]["agent_all"] = "HOLD"
         expected["epoch"] += 1
     elif event["kind"] == "recovery.revalidated":
-        if event.get("owner") != "governance" or event.get("source") not in ("recovery", "runtime"):
+        if event.get("owner") != "governance" or event.get("source") != "recovery":
             return False
-        # Triggering evidence: prior recovery.required or checkpoint.committed
-        has_trigger = any(e for e in events if e["seq"] < event["seq"]
-                          and e["kind"] in ("recovery.required", "checkpoint.committed"))
-        if not has_trigger:
+        has_checkpoint = any(e["seq"] < event["seq"] and e["kind"] == "checkpoint.committed"
+                             and e.get("owner") == "checkpoint" for e in events)
+        has_required = any(e["seq"] < event["seq"] and e["kind"] == "recovery.required"
+                           and e.get("owner") == "governance" for e in events)
+        if not has_checkpoint and not has_required:
             return False
         if before["statuses"].get("agent_all") == "RECOVERY_REQUIRED":
             expected["statuses"]["agent_all"] = "RUNNING"

@@ -42,8 +42,30 @@ class ActorProposal(BaseModel):
         return self
 
 
+def proposal_text(text):
+    """Drop think-channel markup. Does not repair invalid JSON."""
+    raw = text if isinstance(text, str) else text.decode("utf-8")
+    lower = raw.lower()
+    pieces = []
+    pos = 0
+    if "</think>" in lower and "<think>" not in lower[:lower.find("</think>")]:
+        raw = "<think>\n" + raw
+        lower = "<think>\n" + lower
+    while True:
+        start = lower.find("<think>", pos)
+        if start == -1:
+            pieces.append(raw[pos:])
+            break
+        pieces.append(raw[pos:start])
+        end = lower.find("</think>", start)
+        if end == -1:
+            raise ValueError("THINKING_INCOMPLETE")
+        pos = end + len("</think>")
+    return "".join(pieces).strip()
+
+
 def parse_proposal(text):
-    return ActorProposal.model_validate(strict_json(text))
+    return ActorProposal.model_validate(strict_json(proposal_text(text)))
 
 
 CHECKLIST = (
@@ -73,11 +95,15 @@ def render_formatted_input(prompt: str, config: ModelPortConfig | None = None) -
     if not template or template == "raw":
         return prompt
     system = config.system_prompt or SYSTEM_PROPOSAL_INSTRUCTIONS
-    if template in ("qwen_chat", "chatml"):
+    if template == "qwen_chat":
         return (f"<|im_start|>system\n{system}<|im_end|>\n"
                 f"<|im_start|>user\n{prompt.strip()}<|im_end|>\n"
                 f"<|im_start|>assistant\n<think>\n\n</think>\n\n")
-    return prompt
+    if template == "chatml":
+        return (f"<|im_start|>system\n{system}<|im_end|>\n"
+                f"<|im_start|>user\n{prompt.strip()}<|im_end|>\n"
+                f"<|im_start|>assistant\n")
+    raise ValueError("UNKNOWN_CHAT_TEMPLATE")
 
 
 def history_page(store, cursor=0, limit=32):
@@ -199,7 +225,7 @@ class ModelPortConfig(BaseModel):
     max_output_tokens: int = Field(default=1024, gt=0)
     deadline_seconds: int = Field(default=120, gt=0)
     system_prompt: str | None = None
-    chat_template: Literal["raw", "chatml", "qwen_chat"] | str | None = None
+    chat_template: Literal["raw", "chatml", "qwen_chat"] | None = None
     formatting_overhead_bytes: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
@@ -257,7 +283,7 @@ class FrozenModelPort:
             if any(actual[key] != getattr(config, key) for key in actual):
                 raise ValueError("CHECKPOINT_HASH_MISMATCH")
 
-    def generate(self, packet, seed=0):
+    def generate(self, packet, seed=0, prompt_override=None):
         self.last_request_seq = None
         validate_packet(packet)
         usage = self.store.get("model_port", self.phase)
@@ -268,19 +294,18 @@ class FrozenModelPort:
         # public event. Never label this reduced page a full transcript.
         packet = json.loads(canonical(packet))
 
-        def formatted_byte_size(pkt):
-            raw_text = canonical(pkt).decode("utf-8")
-            rendered = render_formatted_input(raw_text, self.config)
+        def formatted_byte_size(text):
+            rendered = render_formatted_input(text, self.config)
             return len(rendered.encode("utf-8")) + self.config.formatting_overhead_bytes
 
-        if self.config.backend == "api" and "history" in packet:
+        if prompt_override is None and self.config.backend == "api" and "history" in packet:
             page = packet["history"]
-            while page["events"] and formatted_byte_size(packet) > self.config.max_input_tokens:
+            while page["events"] and formatted_byte_size(canonical(packet).decode("utf-8")) > self.config.max_input_tokens:
                 page["events"].pop()
                 page["has_more"] = True
                 page["next_cursor"] = page["events"][-1]["seq"] if page["events"] else 0
                 packet["packet_format"] = "compact model edges and bounded history page; all raw history remains retrievable"
-        prompt = canonical(packet).decode("utf-8")
+        prompt = prompt_override if prompt_override is not None else canonical(packet).decode("utf-8")
         formatted_prompt = render_formatted_input(prompt, self.config)
         formatted_bytes = len(formatted_prompt.encode("utf-8")) + self.config.formatting_overhead_bytes
 
@@ -342,7 +367,7 @@ class FrozenModelPort:
                     headers["Authorization"] = "Bearer " + os.environ[self.config.credential_env]
                 req = urllib.request.Request(self.config.endpoint, data=canonical(request), headers=headers)
                 with urllib.request.urlopen(req, timeout=self.config.deadline_seconds) as response:
-                    delivered({"prompt": formatted_prompt if self.config.chat_template else prompt}, "api_response_started")
+                    delivered({"prompt": prompt}, "api_response_started")
                     result = json.loads(response.read(2 * 1024 * 1024))
             else:
                 try:
