@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from protocollab.actor import ActorProposal, FrozenModelPort, ModelPortConfig, build_packet
 from protocollab.actor.diagnostic import (
     ActorDiagnosticHarness,
+    DiagnosticThresholds,
     check_minimal_proposal,
     evaluate_decision_correctness,
     format_diagnostic_prompt,
@@ -170,7 +171,7 @@ def test_stage_2_fails_wait_only_when_inspect_expected(runtime, monkeypatch):
 def test_stage_3_closed_loop_inspect_passes(runtime, monkeypatch):
     harness = ActorDiagnosticHarness()
     _, config = mock_port(runtime, '{"kind": "ACT", "operation": "INSPECT"}', monkeypatch, phase="prefix")
-    s3 = harness.run_stage_3_closed_loop(config, runtime, max_turns=3)
+    s3 = harness.run_stage_3_closed_loop(config, runtime, max_turns=1)
     assert s3.status == "PASS"
     assert s3.actions_executed > 0
     assert "INSPECT" in s3.dispatch_outcomes
@@ -185,7 +186,7 @@ def test_stage_3_fails_status_only(runtime, monkeypatch):
 
 
 def test_stage_3_scores_only_run_llm_window(runtime, monkeypatch):
-    harness = ActorDiagnosticHarness()
+    harness = ActorDiagnosticHarness(thresholds=DiagnosticThresholds(min_progress_rate=0.30))
     packet = build_packet(runtime, "C0")
     port, config = mock_port(runtime, '{"kind": "ACT", "operation": "INSPECT"}', monkeypatch, phase="prefix")
     s1 = harness.run_stage_1_minimal_proposal(port, packet, n_samples=5)

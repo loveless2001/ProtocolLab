@@ -246,6 +246,7 @@ class ModelPortConfig(BaseModel):
     system_prompt: str | None = None
     chat_template: Literal["raw", "chatml", "qwen_chat"] | None = None
     formatting_overhead_bytes: int = Field(default=0, ge=0)
+    supported_decision_modes: list[str] | None = None
 
     @model_validator(mode="after")
     def pinned(self):
@@ -434,7 +435,13 @@ class FrozenModelPort:
                 "reason": type(exc).__name__, "usage_status": "unknown_if_provider_failed_after_send"})
             raise
 
-    def score_candidates(self, prompt: str, candidates: list[str], seed: int = 0) -> dict[str, Any]:
+    def score_candidates(
+        self,
+        prompt: str,
+        candidates: list[str],
+        seed: int = 0,
+        claims: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         self.last_request_seq = None
         usage = self.store.get("model_port", self.phase)
         self.calls, self.input_tokens, self.output_tokens = usage["calls"], usage["input_tokens"], usage["output_tokens"]
@@ -460,8 +467,16 @@ class FrozenModelPort:
         self.store.set("model_port", self.phase, usage, "llm.call_reserved")
         started, called_at = time.monotonic(), datetime.now(timezone.utc).isoformat()
         request_hash = self.store.put_blob(request)
+        claim_refs = claims or []
         self.last_request_seq = self.store.append("model_port", "llm.requested", {
-            "request_hash": request_hash, "called_at": called_at, "claims": []})["seq"]
+            "request_hash": request_hash, "called_at": called_at, "claims": claim_refs})["seq"]
+        self.store.append("model_port", "llm.input_delivered", {
+            "request_seq": self.last_request_seq,
+            "request_hash": request_hash,
+            "input_evidence_hash": self.store.put_blob({"prompt": prompt, "candidates": candidates}),
+            "boundary": "candidate_score_input",
+            "claims": claim_refs,
+        })
 
         try:
             if self.config.backend == "local_frozen_checkpoint":

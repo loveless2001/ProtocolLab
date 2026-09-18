@@ -17,9 +17,7 @@ from protocollab.actor.diagnostic import (
 )
 from protocollab.actor.diagnostic_config import DiagnosticConfig
 from protocollab.actor.modes import DecisionAdapter
-from protocollab.actor.pipeline import compose_and_admit_input
 from protocollab.contracts import MUTATIONS, digest
-from protocollab.learning import BudgetExhausted
 
 
 class ActorDiagnosticHarness:
@@ -65,39 +63,20 @@ class ActorDiagnosticHarness:
         cfg = config or self._ensure_config(port.config)
         ledger = self._get_ledger(port.store, cfg)
         stage_name = "minimal_proposal"
+        adapter = DecisionAdapter(cfg)
 
         result = StageResult(stage=stage_name, status="FAIL")
         valid_count = trunc_count = 0
         gen_statuses: dict[str, int] = {}
 
         for i in range(n_samples):
-            try:
-                ledger.record_admission_attempt(stage_name)
-                unformatted, formatted, evidence = compose_and_admit_input(
-                    packet, port.config, renderer=cfg.renderer, store=port.store, phase=port.phase
-                )
-                reservation = port.config.max_input_tokens + port.config.max_output_tokens
-                ledger.reserve(stage_name, reservation)
-                ledger.record_dispatched(stage_name)
-
-                raw = port.generate(packet, seed=seed, prompt_override=unformatted)
-                backend_meta = {
-                    "output_tokens": port.output_tokens,
-                    "max_output_tokens": port.config.max_output_tokens,
-                }
-                ledger.record_completed(stage_name, port.input_tokens, port.output_tokens, reservation)
-            except Exception as exc:
-                raw = f"PORT_ERROR: {exc}"
-                if isinstance(exc, BudgetExhausted) and ("token" in str(exc) or "cap" in str(exc)):
-                    backend_meta = {"stop_reason": "token_limit_reached"}
-                else:
-                    backend_meta = {"error_type": type(exc).__name__}
-                if "reservation" in locals():
-                    ledger.record_failed(stage_name, reservation)
+            outcome = adapter.decide(port, packet, seed=seed, ledger=ledger, stage=stage_name)
+            raw = outcome.raw_response
+            backend_meta = outcome.backend_meta
 
             copied = is_packet_copy(raw, packet)
             check = check_minimal_proposal(raw, port.config.max_output_tokens, backend_meta=backend_meta)
-            valid, truncated, proposal, reason = check.valid, check.truncated, check.proposal, check.reason
+            valid, truncated, reason = check.valid, check.truncated, check.reason
             status_name = getattr(check, "generation_status", "COMPLETED")
             gen_statuses[status_name] = gen_statuses.get(status_name, 0) + 1
 
@@ -153,6 +132,7 @@ class ActorDiagnosticHarness:
         cfg = config or self._ensure_config(port.config)
         ledger = self._get_ledger(port.store, cfg)
         stage_name = "state_decision"
+        adapter = DecisionAdapter(cfg)
 
         result = StageResult(stage=stage_name, status="FAIL")
         valid_count = correct_count = compliant_count = trunc_count = 0
@@ -160,29 +140,9 @@ class ActorDiagnosticHarness:
 
         for i, scenario in enumerate(test_scenarios):
             packet = scenario["packet"]
-            try:
-                ledger.record_admission_attempt(stage_name)
-                unformatted, formatted, evidence = compose_and_admit_input(
-                    packet, port.config, renderer=cfg.renderer, store=port.store, phase=port.phase
-                )
-                reservation = port.config.max_input_tokens + port.config.max_output_tokens
-                ledger.reserve(stage_name, reservation)
-                ledger.record_dispatched(stage_name)
-
-                raw = port.generate(packet, seed=seed, prompt_override=unformatted)
-                backend_meta = {
-                    "output_tokens": port.output_tokens,
-                    "max_output_tokens": port.config.max_output_tokens,
-                }
-                ledger.record_completed(stage_name, port.input_tokens, port.output_tokens, reservation)
-            except Exception as exc:
-                raw = f"PORT_ERROR: {exc}"
-                if isinstance(exc, BudgetExhausted) and ("token" in str(exc) or "cap" in str(exc)):
-                    backend_meta = {"stop_reason": "token_limit_reached"}
-                else:
-                    backend_meta = {"error_type": type(exc).__name__}
-                if "reservation" in locals():
-                    ledger.record_failed(stage_name, reservation)
+            outcome = adapter.decide(port, packet, seed=seed, ledger=ledger, stage=stage_name)
+            raw = outcome.raw_response
+            backend_meta = outcome.backend_meta
 
             check = check_minimal_proposal(raw, port.config.max_output_tokens, backend_meta=backend_meta)
             valid, truncated, proposal, reason = check.valid, check.truncated, check.proposal, check.reason
@@ -278,9 +238,12 @@ class ActorDiagnosticHarness:
         runtime.max_turns = max_turns
 
         valid_count = 0
-        dispatches_executed = 0
-        seen_observations = set()
-        progress_steps = 0
+        proposed_count = 0
+        denied_or_stale_count = 0
+        dispatched_count = 0
+        acknowledged_count = 0
+        effective_count = 0
+        seen_observations: set[str] = set()
         outcomes: dict[str, int] = {}
 
         try:
@@ -299,13 +262,17 @@ class ActorDiagnosticHarness:
                 if outcome.validation_outcome == "VALID":
                     valid_count += 1
 
+                # Append actor.proposed event with claim refs (§5)
                 runtime.store.append("actor", "actor.proposed", {
                     **proposal.model_dump(),
                     "decision_basis_ref": packet["decision_basis_ref"],
                     "decision_mode": cfg.decision_mode,
                     "is_fallback": outcome.is_fallback,
+                    "claims": outcome.claim_refs,
                 })
                 runtime.sync_monitor()
+
+                proposed_count += 1
 
                 if outcome.is_fallback:
                     # Fallback to WAIT must be labeled fallback, not model-selected abstention
@@ -313,25 +280,48 @@ class ActorDiagnosticHarness:
                     outcomes["WAIT (fallback)"] = outcomes.get("WAIT (fallback)", 0) + 1
                     continue
 
-                if proposal.kind in ("ACT", "WAIT"):
-                    op = proposal.operation or "WAIT"
-                    outcomes[op] = outcomes.get(op, 0) + 1
-                    receipt = runtime.turn(op, decision_basis_ref=packet["decision_basis_ref"])
-                    dispatches_executed += 1
+                if proposal.kind == "WAIT":
+                    # Explicit WAIT: proposed, but 0 dispatches (§1)
+                    runtime.turn("WAIT", decision_basis_ref=packet["decision_basis_ref"])
+                    outcomes["WAIT"] = outcomes.get("WAIT", 0) + 1
+                    continue
 
-                    # Track meaningful progress vs repeated identical reads or no-ops:
-                    if op in MUTATIONS and receipt.get("status") not in ("STALE", "DENIED", "REJECTED"):
-                        progress_steps += 1
-                    elif op == "INSPECT":
-                        new_inspect_obs = [
-                            e for e in runtime.store.events(after=receipt.get("seq", 0) - 1)
-                            if e["kind"] == "epistemic.observation" and e["payload"].get("input_symbol") == "INSPECT"
-                        ]
-                        for obs in new_inspect_obs:
-                            obs_hash = obs.get("payload_hash") or obs["payload"].get("raw_hash")
-                            if obs_hash and obs_hash not in seen_observations:
-                                seen_observations.add(obs_hash)
-                                progress_steps += 1
+                if proposal.kind == "ACT":
+                    op = proposal.operation or "INSPECT"
+                    outcomes[op] = outcomes.get(op, 0) + 1
+                    turn_return = runtime.turn(op, decision_basis_ref=packet["decision_basis_ref"])
+
+                    # Runtime.turn() returns {"action": result, "tick": tick} (§1)
+                    action_res = turn_return.get("action")
+                    if action_res is None:
+                        continue
+
+                    status = action_res.get("status")
+                    if status in ("DENIED", "STALE", "CANCELLED_BEFORE_DISPATCH", "REJECTED"):
+                        denied_or_stale_count += 1
+                        continue
+
+                    if status == "DISPATCH_UNCERTAIN":
+                        dispatched_count += 1
+                        continue
+
+                    if status in ("ACKNOWLEDGED", "OUTCOME_OBSERVED"):
+                        dispatched_count += 1
+                        acknowledged_count += 1
+
+                        # Track effective progress vs repeated identical reads (§1)
+                        if op in MUTATIONS:
+                            effective_count += 1
+                        elif op == "INSPECT":
+                            # Correlate observation with command ID, not raw hash novelty (§1)
+                            receipt_data = action_res.get("receipt") or {}
+                            causal_cmd = receipt_data.get("causal_command_id")
+                            cmd_id = action_res.get("command_id")
+                            if causal_cmd == cmd_id:
+                                domain_output = receipt_data.get("domain_output")
+                                if domain_output is not None and domain_output not in seen_observations:
+                                    seen_observations.add(domain_output)
+                                    effective_count += 1
 
                 elif proposal.kind == "FINISH":
                     outcomes["FINISH"] = outcomes.get("FINISH", 0) + 1
@@ -352,12 +342,18 @@ class ActorDiagnosticHarness:
         result.completed_calls = stage_usage.completed_calls
         result.failures = stage_usage.failures
         result.dispatch_outcomes = outcomes
-        result.actions_executed = dispatches_executed
-        result.actuation_success = dispatches_executed > 0
-        result.task_progress_count = progress_steps
-        result.task_progress_rate = progress_steps / result.calls_attempted
+        result.actions_executed = dispatched_count
+        result.actuation_success = dispatched_count > 0
+        result.task_progress_count = effective_count
+        result.task_progress_rate = effective_count / result.calls_attempted
         result.schema_valid_count = valid_count
         result.schema_valid_rate = valid_count / result.calls_attempted
+        # v2 action lifecycle accounting (§1)
+        result.proposed_actions = proposed_count
+        result.denied_or_stale_actions = denied_or_stale_count
+        result.dispatched_actions = dispatched_count
+        result.acknowledged_actions = acknowledged_count
+        result.effective_actions = effective_count
 
         if result.task_completed or result.task_progress_rate >= self.thresholds.min_progress_rate:
             result.status = "PASS"
