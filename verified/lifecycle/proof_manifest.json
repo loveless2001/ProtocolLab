@@ -1,0 +1,51 @@
+{
+  "version": "1.0.0",
+  "toolchain": {
+    "bend": "2.0.5",
+    "bun": "1.3.8",
+    "node": "25.5.0"
+  },
+  "verification_status": "ALL_TERMS_CHECK",
+  "files": {
+    "Types.bend": {
+      "sha256": "86a26d72367428341d2c44f26815cd4e65fcff4d1c5d73c52c1cd9c36b951040",
+      "bytes": 2138
+    },
+    "Definitions.bend": {
+      "sha256": "4b07c6c032be332f26e5992eff8024584a5a17b678ae347eaf362a8d497a36d3",
+      "bytes": 7281
+    },
+    "Kernel.bend": {
+      "sha256": "fc44c9e76655070b50801c4b19d51715ef36a99299e815af5dc8e9d267b053ff",
+      "bytes": 18999
+    },
+    "LAWS.bend": {
+      "sha256": "b79ac5d5637ebd7057737cf4d0e0f100840a9b86409118ea1c464e17fce9a9a0",
+      "bytes": 6520
+    },
+    "PROOF.bend": {
+      "sha256": "077f1dd7975dd8d3c558bcb0718b7c990785302899f08a32b4cdf681869cd530",
+      "bytes": 1411
+    }
+  },
+  "laws": [
+    "LAW-REPLAY-DETERMINISTIC",
+    "LAW-NONNEGATIVE-TOTALS",
+    "LAW-RESERVATION-CONSERVATION",
+    "LAW-SETTLEMENT-MONOTONIC",
+    "LAW-SINGLE-FLIGHT-DISPATCH",
+    "LAW-UNRESOLVED-ISOLATION",
+    "LAW-CONFLICT-IMMUNITY",
+    "LAW-BOUND-HONORING",
+    "LAW-TERMINAL-FINALITY",
+    "LAW-FAULT-LATCHING",
+    "LAW-CROSS-STAGE-INDEPENDENCE",
+    "LAW-EVIDENCE-INTEGRITY"
+  ],
+  "witnesses": [
+    "WITNESS-POSITIVE-SETTLEMENT",
+    "WITNESS-POSITIVE-RELEASE",
+    "WITNESS-POSITIVE-TIMEOUT",
+    "WITNESS-MULTI-STAGE-COMPLETION"
+  ]
+}
