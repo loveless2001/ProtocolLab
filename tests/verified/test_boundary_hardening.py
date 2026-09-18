@@ -142,3 +142,107 @@ def test_lifecycle_owner_shadow_bridge_failure_does_not_crash_caller():
     owner.record_completed("stage1", 60, 10, 160, req_id="r1")
     owner.record_timeout("stage1", 160, req_id="r1")
     owner.record_failed("stage1", 160, req_id="r1")
+
+
+def test_lifecycle_owner_duplicate_completion_routes_to_same_stage():
+    alloc = DiagnosticBudgetAllocation(
+        stages={
+            "stage1": StageBudgetLimits(max_calls=5, max_tokens=500),
+            "stage2": StageBudgetLimits(max_calls=5, max_tokens=500),
+        },
+        aggregate_max_calls=10,
+        aggregate_max_tokens=1000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="test_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+
+    owner.reserve("stage1", 160, req_id="r1")
+    owner.reserve("stage2", 160, req_id="r2")
+    owner.record_completed("stage1", 60, 10, 160)
+    assert bridge.events[-1]["req_id"] == "r1"
+
+    # Replay completion on stage1 must route to r1, NOT cross-stage leak to r2!
+    owner.record_completed("stage1", 60, 10, 160)
+    assert bridge.events[-1]["req_id"] == "r1"
+
+
+def test_lifecycle_owner_same_stage_fifo_routing():
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=5, max_tokens=500)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=1000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="test_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+
+    owner.reserve("stage1", 160, req_id="r1")
+    owner.reserve("stage1", 160, req_id="r2")
+
+    # First completion routes to r1 (FIFO)
+    owner.record_completed("stage1", 60, 10, 160)
+    assert bridge.events[-1]["req_id"] == "r1"
+
+    # Second completion routes to r2
+    owner.record_completed("stage1", 60, 10, 160)
+    assert bridge.events[-1]["req_id"] == "r2"
+
+
+def test_lifecycle_owner_shadow_init_failure_contained():
+    class InitFailingBridge:
+        def init(self, **kwargs):
+            raise RuntimeError("SIMULATED_KERNEL_STARTUP_FAILURE")
+
+        def apply(self, state, event):
+            pass
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=5, max_tokens=500)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=1000,
+    )
+    # Does not raise in SHADOW mode
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="test_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.SHADOW,
+        bridge=InitFailingBridge(),
+    )
+    assert owner.bend_state is not None
+
+
+def test_mutation_classifier_distinguishes_genuine_from_accidental_errors():
+    def classify(rc, stdout, stderr):
+        output = stdout + stderr
+        if rc in (139, 134, -11, -6) or rc != 1:
+            return False
+        if "All terms check." in stdout:
+            return False
+        out_lower = output.lower()
+        return "expected" in out_lower and "observed" in out_lower
+
+    # Genuine proof mismatch: caught
+    assert classify(1, "", "Error: expected True observed False") is True
+    # Accidental syntax/unannotated literal: rejected (not caught as mutation)
+    assert classify(1, "", "Error: cannot infer an unannotated literal") is False
+    # Missing import: rejected
+    assert classify(1, "", "Error: imported module not found") is False
+    # Toolchain crash: rejected
+    assert classify(139, "", "Segmentation fault") is False
+    # Success without magic string: rejected
+    assert classify(0, "checked successfully", "") is False

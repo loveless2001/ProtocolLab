@@ -57,7 +57,8 @@ class VerifiedLifecycleOwner:
         # Active request ID tracking for stage-level legacy calls
         self._current_req_id: str | None = None
         self._request_stages: dict[str, str] = {}
-        self._stage_active_req_ids: dict[str, str] = {}
+        self._stage_active_req_ids: dict[str, list[str]] = {}
+        self._stage_last_completed: dict[str, str] = {}
 
         # Initialize or load verified ledger state
         stored = store.get("verified_lifecycle_ledger", run_id)
@@ -70,19 +71,32 @@ class VerifiedLifecycleOwner:
                 )
                 for s_name, s_lim in allocation.stages.items()
             ]
-            self.bend_state = self.bridge.init(
-                run_id=run_id,
-                config_hash=config_hash,
-                agg_max_calls=allocation.aggregate_max_calls,
-                agg_max_tokens=allocation.aggregate_max_tokens,
-                stage_limits=stage_limits,
-            )
-            store.set(
-                "verified_lifecycle_ledger",
-                run_id,
-                encode_state(self.bend_state),
-                "verified.lifecycle_initialized",
-            )
+            try:
+                self.bend_state = self.bridge.init(
+                    run_id=run_id,
+                    config_hash=config_hash,
+                    agg_max_calls=allocation.aggregate_max_calls,
+                    agg_max_tokens=allocation.aggregate_max_tokens,
+                    stage_limits=stage_limits,
+                )
+                store.set(
+                    "verified_lifecycle_ledger",
+                    run_id,
+                    encode_state(self.bend_state),
+                    "verified.lifecycle_initialized",
+                )
+            except Exception as init_err:
+                if self.mode == LifecycleMode.SHADOW:
+                    logger.warning("Verified shadow kernel initialization failed: %s", init_err)
+                    self.bend_state = LedgerState(
+                        run_id=run_id,
+                        config_hash=config_hash,
+                        agg_max_calls=allocation.aggregate_max_calls,
+                        agg_max_tokens=allocation.aggregate_max_tokens,
+                        stage_limits=stage_limits,
+                    )
+                else:
+                    raise init_err
         else:
             self.bend_state = decode_state(stored)
 
@@ -147,12 +161,22 @@ class VerifiedLifecycleOwner:
         )
 
     def _sync(self, event_kind: str = "verified.lifecycle_updated"):
-        self.store.set(
-            "verified_lifecycle_ledger",
-            self.run_id,
-            encode_state(self.bend_state),
-            event_kind,
-        )
+        encoded = encode_state(self.bend_state)
+        if hasattr(self.store, "lock"):
+            with self.store.lock:
+                self.store.set(
+                    "verified_lifecycle_ledger",
+                    self.run_id,
+                    encoded,
+                    event_kind,
+                )
+        else:
+            self.store.set(
+                "verified_lifecycle_ledger",
+                self.run_id,
+                encoded,
+                event_kind,
+            )
 
     def record_admission_attempt(self, stage: str):
         if self.mode == LifecycleMode.SHADOW:
@@ -181,7 +205,9 @@ class VerifiedLifecycleOwner:
             req_id = f"req_{uuid.uuid4().hex[:12]}"
         self._current_req_id = req_id
         self._request_stages[req_id] = stage
-        self._stage_active_req_ids[stage] = req_id
+        stage_queue = self._stage_active_req_ids.setdefault(stage, [])
+        if req_id not in stage_queue:
+            stage_queue.append(req_id)
 
         if max_input is None or max_output is None:
             mi = reservation_tokens // 2
@@ -231,9 +257,17 @@ class VerifiedLifecycleOwner:
                 raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
 
     def record_dispatched(self, stage: str, req_id: str | None = None):
-        target_id = req_id or self._stage_active_req_ids.get(stage) or self._current_req_id
+        target_id = req_id
         if target_id is None:
-            target_id = f"req_{uuid.uuid4().hex[:12]}"
+            stage_queue = self._stage_active_req_ids.get(stage)
+            if stage_queue:
+                target_id = stage_queue[0]
+            elif stage in self._stage_last_completed:
+                target_id = self._stage_last_completed[stage]
+            elif self._current_req_id and self._request_stages.get(self._current_req_id) == stage:
+                target_id = self._current_req_id
+            else:
+                target_id = f"req_{uuid.uuid4().hex[:12]}"
 
         ev = {"kind": "DispatchIntent", "req_id": target_id}
 
@@ -263,9 +297,23 @@ class VerifiedLifecycleOwner:
         req_id: str | None = None,
         receipt_hash: str = "receipt_default",
     ):
-        target_id = req_id or self._stage_active_req_ids.get(stage) or self._current_req_id or f"req_{uuid.uuid4().hex[:12]}"
-        if self._stage_active_req_ids.get(stage) == target_id:
-            self._stage_active_req_ids.pop(stage, None)
+        target_id = req_id
+        if target_id is None:
+            stage_queue = self._stage_active_req_ids.get(stage)
+            if stage_queue:
+                target_id = stage_queue.pop(0)
+            elif stage in self._stage_last_completed:
+                target_id = self._stage_last_completed[stage]
+            elif self._current_req_id and self._request_stages.get(self._current_req_id) == stage:
+                target_id = self._current_req_id
+            else:
+                target_id = f"req_{uuid.uuid4().hex[:12]}"
+        else:
+            stage_queue = self._stage_active_req_ids.get(stage)
+            if stage_queue and target_id in stage_queue:
+                stage_queue.remove(target_id)
+
+        self._stage_last_completed[stage] = target_id
 
         ev = {
             "kind": "SettleUsage",
@@ -301,9 +349,23 @@ class VerifiedLifecycleOwner:
         req_id: str | None = None,
         evidence_hash: str = "conclusive_failure",
     ):
-        target_id = req_id or self._stage_active_req_ids.get(stage) or self._current_req_id or f"req_{uuid.uuid4().hex[:12]}"
-        if self._stage_active_req_ids.get(stage) == target_id:
-            self._stage_active_req_ids.pop(stage, None)
+        target_id = req_id
+        if target_id is None:
+            stage_queue = self._stage_active_req_ids.get(stage)
+            if stage_queue:
+                target_id = stage_queue.pop(0)
+            elif stage in self._stage_last_completed:
+                target_id = self._stage_last_completed[stage]
+            elif self._current_req_id and self._request_stages.get(self._current_req_id) == stage:
+                target_id = self._current_req_id
+            else:
+                target_id = f"req_{uuid.uuid4().hex[:12]}"
+        else:
+            stage_queue = self._stage_active_req_ids.get(stage)
+            if stage_queue and target_id in stage_queue:
+                stage_queue.remove(target_id)
+
+        self._stage_last_completed[stage] = target_id
 
         ev = {
             "kind": "FailureConclusive",
@@ -323,6 +385,10 @@ class VerifiedLifecycleOwner:
             res = self.bridge.apply(self.bend_state, ev)
             self.bend_state = res.state
             self._sync("verified.call_failed")
+            if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
+                raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
+            if res.verdict.kind == VerdictKind.REJECTED:
+                raise BudgetExhausted(res.verdict.reason or "REJECTED")
 
     def record_timeout(
         self,
@@ -331,7 +397,24 @@ class VerifiedLifecycleOwner:
         req_id: str | None = None,
         reason: str = "timeout",
     ):
-        target_id = req_id or self._stage_active_req_ids.get(stage) or self._current_req_id or f"req_{uuid.uuid4().hex[:12]}"
+        target_id = req_id
+        if target_id is None:
+            stage_queue = self._stage_active_req_ids.get(stage)
+            if stage_queue:
+                target_id = stage_queue.pop(0)
+            elif stage in self._stage_last_completed:
+                target_id = self._stage_last_completed[stage]
+            elif self._current_req_id and self._request_stages.get(self._current_req_id) == stage:
+                target_id = self._current_req_id
+            else:
+                target_id = f"req_{uuid.uuid4().hex[:12]}"
+        else:
+            stage_queue = self._stage_active_req_ids.get(stage)
+            if stage_queue and target_id in stage_queue:
+                stage_queue.remove(target_id)
+
+        self._stage_last_completed[stage] = target_id
+
         ev = {
             "kind": "TimeoutUnknown",
             "req_id": target_id,
@@ -351,3 +434,7 @@ class VerifiedLifecycleOwner:
             res = self.bridge.apply(self.bend_state, ev)
             self.bend_state = res.state
             self._sync("verified.call_timeout")
+            if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
+                raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
+            if res.verdict.kind == VerdictKind.REJECTED:
+                raise BudgetExhausted(res.verdict.reason or "REJECTED")

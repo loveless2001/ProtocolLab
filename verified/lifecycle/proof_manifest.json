@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
   "toolchain": {
-    "bend": "2.0.5",
+    "bend": "2.0.7",
     "bun": "1.3.8",
     "node": "25.5.0"
   },
@@ -16,8 +16,8 @@
       "bytes": 7281
     },
     "Kernel.bend": {
-      "sha256": "3fb637993b8d7c3b40ee781a0b21d10d072ffbb3de36b7839c892f2a2733c86e",
-      "bytes": 21983
+      "sha256": "c9f92eb73761cb2cb739d08fcae41ee395f77c07d16fb07fa2186eda658f6efa",
+      "bytes": 22288
     },
     "LAWS.bend": {
       "sha256": "b79ac5d5637ebd7057737cf4d0e0f100840a9b86409118ea1c464e17fce9a9a0",

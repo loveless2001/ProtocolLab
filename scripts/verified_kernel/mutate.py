@@ -198,11 +198,13 @@ def check_mutation_breaks_proof(mutation_name: str, kernel_dir: Path) -> tuple[b
         # Check for toolchain crashes (segfault, abort)
         if res.returncode in (139, 134, -11, -6):
             return False, f"Toolchain crashed with returncode {res.returncode}:\n{output}"
-        # Authentic catch requires non-zero exit code indicating type/proof mismatch
+        # Authentic catch requires clean exit code 1 with expected/observed type-checker mismatch
+        # and rejects toolchain crashes, syntax errors, or unannotated import errors
+        out_lower = output.lower()
         passed = (
-            (res.returncode != 0)
+            (res.returncode == 1)
             and ("All terms check." not in res.stdout)
-            and ("Error:" in output or "mismatch" in output.lower())
+            and ("expected" in out_lower and "observed" in out_lower)
         )
         return passed, output
 

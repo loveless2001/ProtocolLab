@@ -21,7 +21,7 @@ The verified kernel execution and proof verification environment is pinned via `
 
 | Component | Pinned Version | Execution Role | Verification Status |
 | :--- | :--- | :--- | :--- |
-| **Bend** | `2.0.5` | Type-checker, theorem prover & compiler | `All terms check.` |
+| **Bend** | `2.0.7` | Type-checker, theorem prover & compiler | `All terms check.` |
 | **Bun** | `1.3.8` | High-performance JS/TS runtime for Bend preloader | Verified functional |
 | **Node.js** | `v25.5.0` | Alternative JS engine compatibility | Pinned |
 | **Python** | `3.12.3` | Host virtual environment (`.venv`) & pytest runner | Verified functional |
@@ -33,23 +33,23 @@ The verified kernel execution and proof verification environment is pinned via `
 {
   "version": "1.0.0",
   "toolchain": {
-    "bend": "2.0.5",
+    "bend": "2.0.7",
     "bun": "1.3.8",
     "node": "25.5.0"
   },
   "verification_status": "ALL_TERMS_CHECK",
   "files": {
     "Types.bend": {
-      "sha256": "4b92b6a95f9d1469e3ea9f2a08f520be35dd2fefdf2a6136d4df99fa51ea6be9",
+      "sha256": "86a26d72367428341d2c44f26815cd4e65fcff4d1c5d73c52c1cd9c36b951040",
       "bytes": 2138
     },
     "Definitions.bend": {
-      "sha256": "c33e660e53a54b34b1979b009e5b8d270387b322a36d2c47a988d8b4c0926fa4",
-      "bytes": 7183
+      "sha256": "4b07c6c032be332f26e5992eff8024584a5a17b678ae347eaf362a8d497a36d3",
+      "bytes": 7281
     },
     "Kernel.bend": {
-      "sha256": "3fb637993b8d7c3b40ee781a0b21d10d072ffbb3de36b7839c892f2a2733c86e",
-      "bytes": 21983
+      "sha256": "c9f92eb73761cb2cb739d08fcae41ee395f77c07d16fb07fa2186eda658f6efa",
+      "bytes": 22288
     },
     "LAWS.bend": {
       "sha256": "b79ac5d5637ebd7057737cf4d0e0f100840a9b86409118ea1c464e17fce9a9a0",
@@ -121,7 +121,7 @@ All 12 laws and 4 witnesses in `verified/lifecycle/LAWS.bend` are proved via com
    - Full universal quantification over unbounded inductive lists is not automated in Bend 2.0.5 and would require manual inductive encoding; ground instance theorems provide exact, machine-checked trace safety.
 
 2. **Hardened Kernel State Machine Invariants (Post-Review):**
-   - **Terminal Release Rejection:** Settling a request that was previously released (`ChargeReleased` / `ProvenNotSent`) is strictly rejected with `Rejected{"CANNOT_SETTLE_RELEASED_REQUEST"}`. This prevents late settlement from exceeding reallocated stage or aggregate token limits.
+   - **Quarantine on Contradictory Usage Evidence:** Attempting to settle a request that was previously released (`ChargeReleased` / `ProvenNotSent`) represents conflicting reliable evidence (provider usage receipt vs conclusive non-dispatch proof). Rather than silently ignoring or discarding the receipt, the kernel latches a state fault (`fault = Some{"CONFLICTING_USAGE_AFTER_RELEASE"}`) and returns `ConflictFault{"CONFLICTING_USAGE_AFTER_RELEASE"}`. This quarantines the state so that subsequent admissions/transitions are rejected with `STATE_FAULT_LATCHED` while retaining the conflict evidence for audit and manual reconciliation.
    - **Transport Monotonicity:** Terminal transport state `ResponseReceived` is immutable: subsequent `EvTimeoutUnknown` or `EvTransportObserved` events evaluate to `DuplicateNoop{}` and cannot regress transport state to `OutcomeUnknown` or `Sent`.
 
 ---
@@ -205,9 +205,11 @@ The runtime architecture maintains separation between the purely functional veri
 - **Subprocess Startup:** Persistent daemon spawned once per session (~150ms startup).
 - **Transaction Overhead:** Sub-millisecond execution (< 0.8ms per `apply` command over stdio pipe).
 - **Exact Numeric Representation:** All tokens and counts mapped to `BigInt` across JSON wire format, guarded by `MAX_SAFE_INT = 9_007_199_254_740_991` to prevent JS float precision loss.
-- **Stage-Isolated Request Tracking:** `VerifiedLifecycleOwner` tracks active request IDs per stage (`_stage_active_req_ids`), correctly routing completions during interleaved multi-stage executions.
-- **Fail-Safe Shadow Execution:** All shadow-mode bridge calls are wrapped in non-propagating exception handlers with warning logs, ensuring bridge errors never fail production callers.
+- **Stage-Isolated Request Tracking:** `VerifiedLifecycleOwner` maintains FIFO request queues per stage (`_stage_active_req_ids`) and tracks completed requests (`_stage_last_completed`), preventing duplicate or replayed completions from leaking across stages and eliminating ambiguity between multiple same-stage requests.
+- **Transactional Ledger Updates:** `_sync` serializes state persistence by acquiring `store.lock` when available.
+- **Fail-Safe Shadow Execution:** All shadow-mode bridge calls (including initialization and transitions) are wrapped in non-propagating exception handlers with warning logs, ensuring bridge errors never fail production callers.
 - **Pydantic Variant Validation:** `Charge` strictly validates required variant fields and rejects negative tokens or incomplete settled charges.
+- **Authentic Mutation Classifier:** `scripts/verified_kernel/mutate.py` requires clean exit code 1 with explicit type-checker mismatch markers (`expected` / `observed`), strictly rejecting compiler crashes, syntax errors, or unannotated import errors.
 
 ---
 
@@ -236,7 +238,7 @@ Existing ProtocolLab components rely on journal event kinds and the `DiagnosticL
 1. **Journal Events Preserved:** `llm.requested`, `llm.input_delivered`, `llm.completed`, `diagnostic.admission_attempted`, `diagnostic.call_reserved`, `diagnostic.call_completed`, etc.
 2. **State Projection:** `owner.state` dynamically yields an immutable, validated `DiagnosticLedgerState` with exact stage breakdown.
 3. **Automated Test Results:**
-   - `pytest tests/verified/`: **34 / 34 passed** (11 mutations, 16 reference traces, 7 boundary hardening tests).
+   - `pytest tests/verified/`: **38 / 38 passed** (11 mutations, 16 reference traces, 11 boundary hardening tests).
    - `pytest tests/test_negative_cases.py tests/test_actor_diagnostic.py tests/test_budget_per_request.py tests/test_diagnostic_budget_ledger.py`: **43 / 43 passed**.
    - Total regression test pass rate: **100%**.
 

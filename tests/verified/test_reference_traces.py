@@ -361,17 +361,18 @@ def test_trace_14_cannot_settle_released_request(bridge):
     s3 = bridge.apply(s2, ev_r2).state
     assert bridge.summarize(s3).total_held == 150
 
-    # Late settlement for released r1 MUST be rejected to protect reallocated budget
+    # Late settlement for released r1 MUST latch a conflict fault to quarantine contradictory evidence
     ev_settle_r1 = {"kind": "SettleUsage", "req_id": "r1", "input_tokens": 60, "output_tokens": 40, "receipt_hash": "rec1"}
     res = bridge.apply(s3, ev_settle_r1)
-    assert res.verdict.kind == VerdictKind.REJECTED
-    assert res.verdict.reason == "CANNOT_SETTLE_RELEASED_REQUEST"
+    assert res.verdict.kind == VerdictKind.CONFLICT_FAULT
+    assert res.verdict.reason == "CONFLICTING_USAGE_AFTER_RELEASE"
+    assert res.state.fault == "CONFLICTING_USAGE_AFTER_RELEASE"
 
-    # Budget invariant strictly preserved: spent remains 0, held is 150, committed is 150 <= 200
-    sum_res = bridge.summarize(res.state)
-    assert sum_res.total_spent == 0
-    assert sum_res.total_held == 150
-    assert sum_res.total_committed == 150
+    # Subsequent admissions on quarantined state are rejected
+    ev_late = {"kind": "Reserve", "req_id": "r3", "stage": "stage1", "basis_ref": "b3", "config_hash": "cfg", "max_input": 20, "max_output": 20}
+    res_late = bridge.apply(res.state, ev_late)
+    assert res_late.verdict.kind == VerdictKind.REJECTED
+    assert res_late.verdict.reason == "STATE_FAULT_LATCHED"
 
 
 # 15. Settled request transport cannot regress on timeout

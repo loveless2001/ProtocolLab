@@ -303,7 +303,12 @@ def apply_settle.step(
             max_input, max_output, input_tokens, output_tokens, receipt_hash
           )
         case T.ChargeReleased{ev_hash}:
-          T.TransResult{state, T.Rejected{"CANNOT_SETTLE_RELEASED_REQUEST"}}
+          match state:
+            case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
+              T.TransResult{
+                T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, Some{"CONFLICTING_USAGE_AFTER_RELEASE"}},
+                T.ConflictFault{"CONFLICTING_USAGE_AFTER_RELEASE"}
+              }
 
 def apply_settle.find_step(
   existing: Maybe<&2, T.RequestRecord>,
