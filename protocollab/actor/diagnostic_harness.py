@@ -48,9 +48,11 @@ class ActorDiagnosticHarness:
         )
         return self.config
 
-    def _get_ledger(self, store: Any, config: DiagnosticConfig) -> DiagnosticLedger:
+    def _get_ledger(self, store: Any, config: DiagnosticConfig) -> Any:
         config_hash = digest(config.model_dump())
-        return DiagnosticLedger(store, config.run_id, config.budget_allocation, config_hash)
+        from protocollab.verified import VerifiedLifecycleOwner, LifecycleMode
+        mode = getattr(config, "lifecycle_mode", LifecycleMode.SHADOW)
+        return VerifiedLifecycleOwner(store, config.run_id, config.budget_allocation, config_hash, mode=mode)
 
     def _accumulate_compute(self, summary: dict[str, int], outcome: Any) -> None:
         meta = getattr(outcome, "backend_meta", {}) or {}
