@@ -1,15 +1,12 @@
 """Reference trace test matrix verifying all 13 lifecycle and budget accounting cases."""
 
 from typing import Any
+
 import pytest
-from protocollab.actor.budget import DiagnosticBudgetAllocation, StageBudgetLimits
-from protocollab.learning import BudgetExhausted
+
 from protocollab.verified.bridge import VerifiedKernelBridge
-from protocollab.verified.lifecycle_owner import VerifiedLifecycleOwner
 from protocollab.verified.protocol import (
     ChargeKind,
-    LedgerState,
-    LifecycleMode,
     StageLimit,
     TransportState,
     VerdictKind,
@@ -165,24 +162,56 @@ def test_trace_4_stage_limit_isolation(bridge):
     s = bridge.init("run_iso", "cfg", 10, 1000, limits)
 
     # Exhaust stage1
-    ev1 = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b", "config_hash": "cfg", "max_input": 50, "max_output": 50}
+    ev1 = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b",
+        "config_hash": "cfg",
+        "max_input": 50,
+        "max_output": 50,
+    }
     res1 = bridge.apply(s, ev1)
     assert res1.verdict.kind == VerdictKind.ACCEPTED
 
     # Stage1 second call fails
-    ev2 = {"kind": "Reserve", "req_id": "r2", "stage": "stage1", "basis_ref": "b", "config_hash": "cfg", "max_input": 10, "max_output": 10}
+    ev2 = {
+        "kind": "Reserve",
+        "req_id": "r2",
+        "stage": "stage1",
+        "basis_ref": "b",
+        "config_hash": "cfg",
+        "max_input": 10,
+        "max_output": 10,
+    }
     res2 = bridge.apply(res1.state, ev2)
     assert res2.verdict.kind == VerdictKind.REJECTED
 
     # Stage2 is unaffected and succeeds!
-    ev3 = {"kind": "Reserve", "req_id": "r3", "stage": "stage2", "basis_ref": "b", "config_hash": "cfg", "max_input": 50, "max_output": 50}
+    ev3 = {
+        "kind": "Reserve",
+        "req_id": "r3",
+        "stage": "stage2",
+        "basis_ref": "b",
+        "config_hash": "cfg",
+        "max_input": 50,
+        "max_output": 50,
+    }
     res3 = bridge.apply(res1.state, ev3)
     assert res3.verdict.kind == VerdictKind.ACCEPTED
 
 
 # 5. Timeout preservation (Held tokens not zeroed)
 def test_trace_5_timeout_preservation(bridge, standard_state):
-    ev1 = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
+    ev1 = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b",
+        "config_hash": "cfg_hash_1",
+        "max_input": 100,
+        "max_output": 50,
+    }
     res1 = bridge.apply(standard_state, ev1)
 
     ev_disp = {"kind": "DispatchIntent", "req_id": "r1"}
@@ -204,11 +233,27 @@ def test_trace_5_timeout_preservation(bridge, standard_state):
 
 # 6. Conflict fault latching
 def test_trace_6_conflict_fault_latching(bridge, standard_state):
-    ev1 = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
+    ev1 = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg_hash_1",
+        "max_input": 100,
+        "max_output": 50,
+    }
     res1 = bridge.apply(standard_state, ev1)
 
     # Conflicting reservation: different max_input
-    ev_conflict = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 200, "max_output": 50}
+    ev_conflict = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg_hash_1",
+        "max_input": 200,
+        "max_output": 50,
+    }
     res2 = bridge.apply(res1.state, ev_conflict)
     assert res2.verdict.kind == VerdictKind.CONFLICT_FAULT
     assert res2.verdict.reason == "CONFLICTING_REQUEST_IDENTITY"
@@ -217,11 +262,25 @@ def test_trace_6_conflict_fault_latching(bridge, standard_state):
 
 # 7. Bound overrun fault
 def test_trace_7_bound_overrun_fault(bridge, standard_state):
-    ev1 = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
+    ev1 = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg_hash_1",
+        "max_input": 100,
+        "max_output": 50,
+    }
     res1 = bridge.apply(standard_state, ev1)
 
     # Settle with 120 + 50 = 170 > 150
-    ev_settle = {"kind": "SettleUsage", "req_id": "r1", "input_tokens": 120, "output_tokens": 50, "receipt_hash": "over_receipt"}
+    ev_settle = {
+        "kind": "SettleUsage",
+        "req_id": "r1",
+        "input_tokens": 120,
+        "output_tokens": 50,
+        "receipt_hash": "over_receipt",
+    }
     res2 = bridge.apply(res1.state, ev_settle)
     assert res2.verdict.kind == VerdictKind.CONFLICT_FAULT
     assert res2.verdict.reason == "BOUND_VIOLATION_FAULT"
@@ -233,7 +292,15 @@ def test_trace_7_bound_overrun_fault(bridge, standard_state):
 
 # 8. Conclusive failure release
 def test_trace_8_conclusive_failure_release(bridge, standard_state):
-    ev1 = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
+    ev1 = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg_hash_1",
+        "max_input": 100,
+        "max_output": 50,
+    }
     res1 = bridge.apply(standard_state, ev1)
     assert bridge.summarize(res1.state).total_held == 150
 
@@ -251,7 +318,15 @@ def test_trace_8_conclusive_failure_release(bridge, standard_state):
 
 # 9. Duplicate request idempotent no-op
 def test_trace_9_duplicate_noop(bridge, standard_state):
-    ev1 = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
+    ev1 = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg_hash_1",
+        "max_input": 100,
+        "max_output": 50,
+    }
     res1 = bridge.apply(standard_state, ev1)
 
     # Identical reservation duplicate
@@ -268,14 +343,42 @@ def test_trace_9_duplicate_noop(bridge, standard_state):
 
 # 10. Multi-stage concurrent tracking
 def test_trace_10_multi_stage_concurrent(bridge, standard_state):
-    ev_r1 = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
-    ev_r2 = {"kind": "Reserve", "req_id": "r2", "stage": "stage2", "basis_ref": "b2", "config_hash": "cfg_hash_1", "max_input": 80, "max_output": 40}
+    ev_r1 = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg_hash_1",
+        "max_input": 100,
+        "max_output": 50,
+    }
+    ev_r2 = {
+        "kind": "Reserve",
+        "req_id": "r2",
+        "stage": "stage2",
+        "basis_ref": "b2",
+        "config_hash": "cfg_hash_1",
+        "max_input": 80,
+        "max_output": 40,
+    }
 
     s1 = bridge.apply(standard_state, ev_r1).state
     s2 = bridge.apply(s1, ev_r2).state
 
-    ev_settle_r1 = {"kind": "SettleUsage", "req_id": "r1", "input_tokens": 40, "output_tokens": 30, "receipt_hash": "rec1"}
-    ev_settle_r2 = {"kind": "SettleUsage", "req_id": "r2", "input_tokens": 30, "output_tokens": 20, "receipt_hash": "rec2"}
+    ev_settle_r1 = {
+        "kind": "SettleUsage",
+        "req_id": "r1",
+        "input_tokens": 40,
+        "output_tokens": 30,
+        "receipt_hash": "rec1",
+    }
+    ev_settle_r2 = {
+        "kind": "SettleUsage",
+        "req_id": "r2",
+        "input_tokens": 30,
+        "output_tokens": 20,
+        "receipt_hash": "rec2",
+    }
 
     s3 = bridge.apply(s2, ev_settle_r1).state
     s4 = bridge.apply(s3, ev_settle_r2).state
@@ -290,9 +393,23 @@ def test_trace_10_multi_stage_concurrent(bridge, standard_state):
 
 # 11. Terminal settled cannot release
 def test_trace_11_terminal_settled_cannot_release(bridge, standard_state):
-    ev_res = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
+    ev_res = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg_hash_1",
+        "max_input": 100,
+        "max_output": 50,
+    }
     s1 = bridge.apply(standard_state, ev_res).state
-    ev_settle = {"kind": "SettleUsage", "req_id": "r1", "input_tokens": 40, "output_tokens": 30, "receipt_hash": "rec1"}
+    ev_settle = {
+        "kind": "SettleUsage",
+        "req_id": "r1",
+        "input_tokens": 40,
+        "output_tokens": 30,
+        "receipt_hash": "rec1",
+    }
     s2 = bridge.apply(s1, ev_settle).state
 
     # Trying to release an already settled request
@@ -305,14 +422,38 @@ def test_trace_11_terminal_settled_cannot_release(bridge, standard_state):
 # 12. Latched fault rejects transitions
 def test_trace_12_latched_fault_rejects(bridge, standard_state):
     # Latch a fault via conflict
-    ev_res = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
+    ev_res = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg_hash_1",
+        "max_input": 100,
+        "max_output": 50,
+    }
     s1 = bridge.apply(standard_state, ev_res).state
-    ev_conflict = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 200, "max_output": 50}
+    ev_conflict = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg_hash_1",
+        "max_input": 200,
+        "max_output": 50,
+    }
     s_fault = bridge.apply(s1, ev_conflict).state
     assert s_fault.fault is not None
 
     # Any new event on faulted state must be rejected
-    ev_new = {"kind": "Reserve", "req_id": "r2", "stage": "stage1", "basis_ref": "b2", "config_hash": "cfg_hash_1", "max_input": 10, "max_output": 10}
+    ev_new = {
+        "kind": "Reserve",
+        "req_id": "r2",
+        "stage": "stage1",
+        "basis_ref": "b2",
+        "config_hash": "cfg_hash_1",
+        "max_input": 10,
+        "max_output": 10,
+    }
     res = bridge.apply(s_fault, ev_new)
     assert res.verdict.kind == VerdictKind.REJECTED
     assert res.verdict.reason == "STATE_FAULT_LATCHED"
@@ -321,11 +462,33 @@ def test_trace_12_latched_fault_rejects(bridge, standard_state):
 # 13. Deterministic replay from journal
 def test_trace_13_deterministic_replay(bridge, standard_state):
     events = [
-        {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50},
+        {
+            "kind": "Reserve",
+            "req_id": "r1",
+            "stage": "stage1",
+            "basis_ref": "b1",
+            "config_hash": "cfg_hash_1",
+            "max_input": 100,
+            "max_output": 50,
+        },
         {"kind": "DispatchIntent", "req_id": "r1"},
         {"kind": "TransportObserved", "req_id": "r1", "boundary": "http://api"},
-        {"kind": "SettleUsage", "req_id": "r1", "input_tokens": 40, "output_tokens": 30, "receipt_hash": "rec1"},
-        {"kind": "Reserve", "req_id": "r2", "stage": "stage2", "basis_ref": "b2", "config_hash": "cfg_hash_1", "max_input": 60, "max_output": 30},
+        {
+            "kind": "SettleUsage",
+            "req_id": "r1",
+            "input_tokens": 40,
+            "output_tokens": 30,
+            "receipt_hash": "rec1",
+        },
+        {
+            "kind": "Reserve",
+            "req_id": "r2",
+            "stage": "stage2",
+            "basis_ref": "b2",
+            "config_hash": "cfg_hash_1",
+            "max_input": 60,
+            "max_output": 30,
+        },
         {"kind": "FailureConclusive", "req_id": "r2", "evidence_hash": "proof_fail"},
     ]
 
@@ -347,7 +510,15 @@ def test_trace_14_cannot_settle_released_request(bridge):
     s0 = bridge.init("run_counterexample", "cfg", 10, 200, limits)
 
     # Reserve r1 (150 tokens)
-    ev_r1 = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg", "max_input": 100, "max_output": 50}
+    ev_r1 = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg",
+        "max_input": 100,
+        "max_output": 50,
+    }
     s1 = bridge.apply(s0, ev_r1).state
     assert bridge.summarize(s1).total_held == 150
 
@@ -357,19 +528,41 @@ def test_trace_14_cannot_settle_released_request(bridge):
     assert bridge.summarize(s2).total_held == 0
 
     # Reserve r2 (150 tokens) - capacity now reallocated to r2
-    ev_r2 = {"kind": "Reserve", "req_id": "r2", "stage": "stage1", "basis_ref": "b2", "config_hash": "cfg", "max_input": 100, "max_output": 50}
+    ev_r2 = {
+        "kind": "Reserve",
+        "req_id": "r2",
+        "stage": "stage1",
+        "basis_ref": "b2",
+        "config_hash": "cfg",
+        "max_input": 100,
+        "max_output": 50,
+    }
     s3 = bridge.apply(s2, ev_r2).state
     assert bridge.summarize(s3).total_held == 150
 
     # Late settlement for released r1 MUST latch a conflict fault to quarantine contradictory evidence
-    ev_settle_r1 = {"kind": "SettleUsage", "req_id": "r1", "input_tokens": 60, "output_tokens": 40, "receipt_hash": "rec1"}
+    ev_settle_r1 = {
+        "kind": "SettleUsage",
+        "req_id": "r1",
+        "input_tokens": 60,
+        "output_tokens": 40,
+        "receipt_hash": "rec1",
+    }
     res = bridge.apply(s3, ev_settle_r1)
     assert res.verdict.kind == VerdictKind.CONFLICT_FAULT
     assert res.verdict.reason == "CONFLICTING_USAGE_AFTER_RELEASE"
     assert res.state.fault == "CONFLICTING_USAGE_AFTER_RELEASE"
 
     # Subsequent admissions on quarantined state are rejected
-    ev_late = {"kind": "Reserve", "req_id": "r3", "stage": "stage1", "basis_ref": "b3", "config_hash": "cfg", "max_input": 20, "max_output": 20}
+    ev_late = {
+        "kind": "Reserve",
+        "req_id": "r3",
+        "stage": "stage1",
+        "basis_ref": "b3",
+        "config_hash": "cfg",
+        "max_input": 20,
+        "max_output": 20,
+    }
     res_late = bridge.apply(res.state, ev_late)
     assert res_late.verdict.kind == VerdictKind.REJECTED
     assert res_late.verdict.reason == "STATE_FAULT_LATCHED"
@@ -377,9 +570,23 @@ def test_trace_14_cannot_settle_released_request(bridge):
 
 # 15. Settled request transport cannot regress on timeout
 def test_trace_15_settled_request_timeout_idempotent(bridge, standard_state):
-    ev_res = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
+    ev_res = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg_hash_1",
+        "max_input": 100,
+        "max_output": 50,
+    }
     s1 = bridge.apply(standard_state, ev_res).state
-    ev_settle = {"kind": "SettleUsage", "req_id": "r1", "input_tokens": 40, "output_tokens": 30, "receipt_hash": "rec1"}
+    ev_settle = {
+        "kind": "SettleUsage",
+        "req_id": "r1",
+        "input_tokens": 40,
+        "output_tokens": 30,
+        "receipt_hash": "rec1",
+    }
     s2 = bridge.apply(s1, ev_settle).state
     assert s2.requests[0].transport == TransportState.RESPONSE_RECEIVED
     assert s2.requests[0].charge.kind == ChargeKind.SETTLED
@@ -394,9 +601,23 @@ def test_trace_15_settled_request_timeout_idempotent(bridge, standard_state):
 
 # 16. Settled request transport cannot regress on transport observation
 def test_trace_16_settled_request_transport_idempotent(bridge, standard_state):
-    ev_res = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
+    ev_res = {
+        "kind": "Reserve",
+        "req_id": "r1",
+        "stage": "stage1",
+        "basis_ref": "b1",
+        "config_hash": "cfg_hash_1",
+        "max_input": 100,
+        "max_output": 50,
+    }
     s1 = bridge.apply(standard_state, ev_res).state
-    ev_settle = {"kind": "SettleUsage", "req_id": "r1", "input_tokens": 40, "output_tokens": 30, "receipt_hash": "rec1"}
+    ev_settle = {
+        "kind": "SettleUsage",
+        "req_id": "r1",
+        "input_tokens": 40,
+        "output_tokens": 30,
+        "receipt_hash": "rec1",
+    }
     s2 = bridge.apply(s1, ev_settle).state
     assert s2.requests[0].transport == TransportState.RESPONSE_RECEIVED
 
@@ -405,4 +626,3 @@ def test_trace_16_settled_request_transport_idempotent(bridge, standard_state):
     res = bridge.apply(s2, ev_trans)
     assert res.verdict.kind == VerdictKind.DUPLICATE_NOOP
     assert res.state.requests[0].transport == TransportState.RESPONSE_RECEIVED
-

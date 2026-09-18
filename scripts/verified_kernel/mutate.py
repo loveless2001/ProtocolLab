@@ -5,13 +5,11 @@ and verifies that machine-checked proofs fail for every mutation.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
-from pathlib import Path
-import re
+
 import shutil
 import subprocess
 import tempfile
-from typing import Callable
+from pathlib import Path
 
 MUTATIONS: dict[str, tuple[str, str, str]] = {
     "MUTATION_PERMISSIVE_RESERVATION": (
@@ -20,12 +18,12 @@ MUTATIONS: dict[str, tuple[str, str, str]] = {
                 Nat.is_le(1n+stage_calls, max_calls),
                 Nat.is_le(1n+agg_calls, agg_max_calls)
               )""",
-        "calls_ok = True{}"
+        "calls_ok = True{}",
     ),
     "MUTATION_CALL_DRIFT": (
         "Counts calls independently of request list (constant zero)",
         "stage_calls = D.count_stage_calls(requests, s_name)",
-        "stage_calls = 0n"
+        "stage_calls = 0n",
     ),
     "MUTATION_TOKEN_DRIFT": (
         "Allows unreserved token allocation (bypasses token limit check)",
@@ -33,7 +31,7 @@ MUTATIONS: dict[str, tuple[str, str, str]] = {
             Nat.is_le(Nat.add(stage_comm, req_tokens), max_tokens),
             Nat.is_le(Nat.add(agg_comm, req_tokens), agg_max_tokens)
           )""",
-        "tokens_ok = True{}"
+        "tokens_ok = True{}",
     ),
     "MUTATION_EARLY_RELEASE": (
         "Zeros reservation on timeout instead of preserving pending charge",
@@ -46,7 +44,7 @@ MUTATIONS: dict[str, tuple[str, str, str]] = {
                     id, stage, basis_ref, config_hash, max_input, max_output,
                     T.OutcomeUnknown{},
                     T.ChargeReleased{""}
-                  } : T.RequestRecord}"""
+                  } : T.RequestRecord}""",
     ),
     "MUTATION_SILENT_OVERWRITE": (
         "Overwrites conflicting request identity without latching fault",
@@ -68,21 +66,21 @@ MUTATIONS: dict[str, tuple[str, str, str]] = {
   same: Bool,
   state: T.LedgerState
 ) -> T.TransitionResult:
-  T.TransResult{state, T.DuplicateNoop{}}"""
+  T.TransResult{state, T.DuplicateNoop{}}""",
     ),
     "MUTATION_DOUBLE_DISPATCH": (
         "Creates duplicate accepted dispatch intent for an already dispatched request",
         """case T.DispatchedIntent{}:
               T.TransResult{state, T.DuplicateNoop{}}""",
         """case T.DispatchedIntent{}:
-              T.TransResult{state, T.Accepted{None{}}}"""
+              T.TransResult{state, T.Accepted{None{}}}""",
     ),
     "MUTATION_UNCHECKED_OVERRUN": (
         "Settles without checking bound or latching fault",
         """actual = Nat.add(input_tokens, output_tokens)
           is_overflow = Nat.is_gt(actual, bound)""",
         """actual = Nat.add(input_tokens, output_tokens)
-          is_overflow = False{}"""
+          is_overflow = False{}""",
     ),
     "MUTATION_TERMINAL_RELEASE": (
         "Releases settled request as failed instead of rejecting",
@@ -99,7 +97,7 @@ MUTATIONS: dict[str, tuple[str, str, str]] = {
                   T.TransResult{
                     T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
                     T.Accepted{None{}}
-                  }"""
+                  }""",
     ),
     "MUTATION_STATE_UNLATCHED": (
         "Allows state transitions to proceed after state fault is latched",
@@ -141,22 +139,22 @@ MUTATIONS: dict[str, tuple[str, str, str]] = {
             req_id, stage, basis_ref, config_hash, max_input, max_output
           )
         case None{}:
-          apply_reserve.check_existing("""
+          apply_reserve.check_existing(""",
     ),
     "MUTATION_CROSS_STAGE_LEAK": (
         "Records stage 1 request under stage 2, causing cross-stage leakage",
         """new_rec = {T.ReqRecord{
             req_id, stage, basis_ref, config_hash, max_input, max_output,""",
         """new_rec = {T.ReqRecord{
-            req_id, "stage2", basis_ref, config_hash, max_input, max_output,"""
+            req_id, "stage2", basis_ref, config_hash, max_input, max_output,""",
     ),
     "MUTATION_EVIDENCE_BYPASS": (
         "Allows repeated failure release transitions without idempotency guard",
         """case T.ChargeReleased{ex_hash}:
               T.TransResult{state, T.DuplicateNoop{}}""",
         """case T.ChargeReleased{ex_hash}:
-              T.TransResult{state, T.Accepted{None{}}}"""
-    )
+              T.TransResult{state, T.Accepted{None{}}}""",
+    ),
 }
 
 
@@ -177,14 +175,15 @@ def check_mutation_breaks_proof(mutation_name: str, kernel_dir: Path) -> tuple[b
         # Copy all bend files
         for f in kernel_dir.glob("*.bend"):
             shutil.copy(f, tmp_path / f.name)
-        
+
         # Mutate Kernel.bend
         orig_kernel = (tmp_path / "Kernel.bend").read_text()
         mutated_kernel = apply_mutation(orig_kernel, mutation_name)
         (tmp_path / "Kernel.bend").write_text(mutated_kernel)
-        
+
         # Run bend PROOF.bend
         import os
+
         env = dict(os.environ)
         env["HOME"] = str(Path.home())
         env["BEND_NO_TELEMETRY"] = "1"
@@ -192,7 +191,7 @@ def check_mutation_breaks_proof(mutation_name: str, kernel_dir: Path) -> tuple[b
             ["/home/lenovo/.bend/bin/bend", str(tmp_path / "PROOF.bend")],
             capture_output=True,
             text=True,
-            env=env
+            env=env,
         )
         output = res.stdout + res.stderr
         # Check for toolchain crashes (segfault, abort)

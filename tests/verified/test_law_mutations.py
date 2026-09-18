@@ -1,7 +1,9 @@
 """Test that all 11 semantic mutations to Kernel.bend are caught by machine-checked proofs."""
 
 from pathlib import Path
+
 import pytest
+
 from scripts.verified_kernel.mutate import MUTATIONS, check_mutation_breaks_proof
 
 KERNEL_DIR = Path(__file__).resolve().parent.parent.parent / "verified" / "lifecycle"

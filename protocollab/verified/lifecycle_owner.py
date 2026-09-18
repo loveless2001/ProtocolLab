@@ -1,15 +1,15 @@
 """Lifecycle owner coordinating verified Bend kernel and effectful Python shell."""
 
 from __future__ import annotations
+
 import logging
-from typing import Any
 import uuid
+from typing import Any
 
 from protocollab.actor.budget import (
     DiagnosticBudgetAllocation,
     DiagnosticLedger,
     DiagnosticLedgerState,
-    StageBudgetLimits,
     StageUsageRecord,
 )
 from protocollab.learning import BudgetExhausted
@@ -59,6 +59,7 @@ class VerifiedLifecycleOwner:
         self._request_stages: dict[str, str] = {}
         self._stage_active_req_ids: dict[str, list[str]] = {}
         self._stage_last_completed: dict[str, str] = {}
+        self._receipt_to_req_id: dict[str, str] = {}
 
         # Initialize or load verified ledger state
         stored = store.get("verified_lifecycle_ledger", run_id)
@@ -99,6 +100,7 @@ class VerifiedLifecycleOwner:
                     raise init_err
         else:
             self.bend_state = decode_state(stored)
+            self._reconstruct_routing()
 
     @property
     def state(self) -> DiagnosticLedgerState:
@@ -160,23 +162,56 @@ class VerifiedLifecycleOwner:
             aggregate=agg,
         )
 
+    def _reconstruct_routing(self):
+        self._request_stages.clear()
+        self._stage_active_req_ids.clear()
+        self._stage_last_completed.clear()
+        self._receipt_to_req_id.clear()
+        for req in reversed(self.bend_state.requests):
+            self._request_stages[req.req_id] = req.stage
+            if req.charge.kind == ChargeKind.PENDING:
+                queue = self._stage_active_req_ids.setdefault(req.stage, [])
+                if req.req_id not in queue:
+                    queue.append(req.req_id)
+            elif req.charge.kind == ChargeKind.SETTLED:
+                self._stage_last_completed[req.stage] = req.req_id
+                if req.charge.receipt_hash:
+                    self._receipt_to_req_id[req.charge.receipt_hash] = req.req_id
+            elif req.charge.kind == ChargeKind.RELEASED:
+                self._stage_last_completed[req.stage] = req.req_id
+
+    def _refresh_state(self):
+        stored = self.store.get("verified_lifecycle_ledger", self.run_id)
+        if stored is not None:
+            latest = decode_state(stored)
+            if latest != self.bend_state:
+                self.bend_state = latest
+                self._reconstruct_routing()
+
     def _sync(self, event_kind: str = "verified.lifecycle_updated"):
         encoded = encode_state(self.bend_state)
-        if hasattr(self.store, "lock"):
-            with self.store.lock:
-                self.store.set(
-                    "verified_lifecycle_ledger",
-                    self.run_id,
-                    encoded,
-                    event_kind,
-                )
+        self.store.set(
+            "verified_lifecycle_ledger",
+            self.run_id,
+            encoded,
+            event_kind,
+        )
+
+    def _apply_bridge(self, ev: dict[str, Any], event_kind: str) -> Any:
+        lock = getattr(self.store, "lock", None)
+        if lock:
+            with lock:
+                self._refresh_state()
+                res = self.bridge.apply(self.bend_state, ev)
+                self.bend_state = res.state
+                self._sync(event_kind)
+                return res
         else:
-            self.store.set(
-                "verified_lifecycle_ledger",
-                self.run_id,
-                encoded,
-                event_kind,
-            )
+            self._refresh_state()
+            res = self.bridge.apply(self.bend_state, ev)
+            self.bend_state = res.state
+            self._sync(event_kind)
+            return res
 
     def record_admission_attempt(self, stage: str):
         if self.mode == LifecycleMode.SHADOW:
@@ -231,26 +266,18 @@ class VerifiedLifecycleOwner:
             try:
                 self.legacy_ledger.reserve(stage, reservation_tokens)
             except Exception as legacy_err:
-                # Also execute shadow transition
                 try:
-                    res = self.bridge.apply(self.bend_state, ev)
-                    self.bend_state = res.state
-                    self._sync("verified.call_reserved_shadow")
+                    self._apply_bridge(ev, "verified.call_reserved_shadow")
                 except Exception as shadow_err:
                     logger.warning("Verified shadow kernel reserve failed: %s", shadow_err)
                 raise legacy_err
 
-            # Shadow transition
             try:
-                res = self.bridge.apply(self.bend_state, ev)
-                self.bend_state = res.state
-                self._sync("verified.call_reserved_shadow")
+                self._apply_bridge(ev, "verified.call_reserved_shadow")
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel reserve failed: %s", shadow_err)
         else:
-            res = self.bridge.apply(self.bend_state, ev)
-            self.bend_state = res.state
-            self._sync("verified.call_reserved")
+            res = self._apply_bridge(ev, "verified.call_reserved")
             if res.verdict.kind == VerdictKind.REJECTED:
                 raise BudgetExhausted(res.verdict.reason or "REJECTED")
             if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
@@ -274,15 +301,11 @@ class VerifiedLifecycleOwner:
         if self.mode == LifecycleMode.SHADOW:
             self.legacy_ledger.record_dispatched(stage)
             try:
-                res = self.bridge.apply(self.bend_state, ev)
-                self.bend_state = res.state
-                self._sync("verified.call_dispatched_shadow")
+                self._apply_bridge(ev, "verified.call_dispatched_shadow")
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_dispatched failed: %s", shadow_err)
         else:
-            res = self.bridge.apply(self.bend_state, ev)
-            self.bend_state = res.state
-            self._sync("verified.call_dispatched")
+            res = self._apply_bridge(ev, "verified.call_dispatched")
             if res.verdict.kind == VerdictKind.REJECTED:
                 raise BudgetExhausted(res.verdict.reason or "REJECTED")
             if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
@@ -299,21 +322,26 @@ class VerifiedLifecycleOwner:
     ):
         target_id = req_id
         if target_id is None:
-            stage_queue = self._stage_active_req_ids.get(stage)
-            if stage_queue:
-                target_id = stage_queue.pop(0)
-            elif stage in self._stage_last_completed:
-                target_id = self._stage_last_completed[stage]
-            elif self._current_req_id and self._request_stages.get(self._current_req_id) == stage:
-                target_id = self._current_req_id
+            if receipt_hash and receipt_hash != "receipt_default" and receipt_hash in self._receipt_to_req_id:
+                target_id = self._receipt_to_req_id[receipt_hash]
             else:
-                target_id = f"req_{uuid.uuid4().hex[:12]}"
+                stage_queue = self._stage_active_req_ids.get(stage)
+                if stage_queue:
+                    target_id = stage_queue.pop(0)
+                elif stage in self._stage_last_completed:
+                    target_id = self._stage_last_completed[stage]
+                elif self._current_req_id and self._request_stages.get(self._current_req_id) == stage:
+                    target_id = self._current_req_id
+                else:
+                    target_id = f"req_{uuid.uuid4().hex[:12]}"
         else:
             stage_queue = self._stage_active_req_ids.get(stage)
             if stage_queue and target_id in stage_queue:
                 stage_queue.remove(target_id)
 
         self._stage_last_completed[stage] = target_id
+        if receipt_hash and receipt_hash != "receipt_default":
+            self._receipt_to_req_id[receipt_hash] = target_id
 
         ev = {
             "kind": "SettleUsage",
@@ -328,16 +356,26 @@ class VerifiedLifecycleOwner:
                 stage, input_tokens, output_tokens, reservation_tokens
             )
             try:
-                res = self.bridge.apply(self.bend_state, ev)
-                self.bend_state = res.state
-                self._sync("verified.call_completed_shadow")
+                self._apply_bridge(ev, "verified.call_completed_shadow")
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_completed failed: %s", shadow_err)
         else:
-            res = self.bridge.apply(self.bend_state, ev)
-            self.bend_state = res.state
-            self._sync("verified.call_completed")
+            res = self._apply_bridge(ev, "verified.call_completed")
             if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
+                self.store.set(
+                    "verified_quarantine_records",
+                    f"{self.run_id}:{target_id}",
+                    {
+                        "run_id": self.run_id,
+                        "req_id": target_id,
+                        "stage": stage,
+                        "receipt_hash": receipt_hash,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "fault": res.verdict.reason or "CONFLICTING_USAGE_AFTER_RELEASE",
+                    },
+                    "verified.quarantine_conflict_recorded",
+                )
                 raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
             if res.verdict.kind == VerdictKind.REJECTED:
                 raise BudgetExhausted(res.verdict.reason or "REJECTED")
@@ -376,15 +414,11 @@ class VerifiedLifecycleOwner:
         if self.mode == LifecycleMode.SHADOW:
             self.legacy_ledger.record_failed(stage, reservation_tokens)
             try:
-                res = self.bridge.apply(self.bend_state, ev)
-                self.bend_state = res.state
-                self._sync("verified.call_failed_shadow")
+                self._apply_bridge(ev, "verified.call_failed_shadow")
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_failed failed: %s", shadow_err)
         else:
-            res = self.bridge.apply(self.bend_state, ev)
-            self.bend_state = res.state
-            self._sync("verified.call_failed")
+            res = self._apply_bridge(ev, "verified.call_failed")
             if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
                 raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
             if res.verdict.kind == VerdictKind.REJECTED:
@@ -401,17 +435,13 @@ class VerifiedLifecycleOwner:
         if target_id is None:
             stage_queue = self._stage_active_req_ids.get(stage)
             if stage_queue:
-                target_id = stage_queue.pop(0)
+                target_id = stage_queue[0]
             elif stage in self._stage_last_completed:
                 target_id = self._stage_last_completed[stage]
             elif self._current_req_id and self._request_stages.get(self._current_req_id) == stage:
                 target_id = self._current_req_id
             else:
                 target_id = f"req_{uuid.uuid4().hex[:12]}"
-        else:
-            stage_queue = self._stage_active_req_ids.get(stage)
-            if stage_queue and target_id in stage_queue:
-                stage_queue.remove(target_id)
 
         self._stage_last_completed[stage] = target_id
 
@@ -425,15 +455,11 @@ class VerifiedLifecycleOwner:
             # In legacy ledger, timeouts were zeroed via record_failed
             self.legacy_ledger.record_failed(stage, reservation_tokens)
             try:
-                res = self.bridge.apply(self.bend_state, ev)
-                self.bend_state = res.state
-                self._sync("verified.call_timeout_shadow")
+                self._apply_bridge(ev, "verified.call_timeout_shadow")
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_timeout failed: %s", shadow_err)
         else:
-            res = self.bridge.apply(self.bend_state, ev)
-            self.bend_state = res.state
-            self._sync("verified.call_timeout")
+            res = self._apply_bridge(ev, "verified.call_timeout")
             if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
                 raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
             if res.verdict.kind == VerdictKind.REJECTED:

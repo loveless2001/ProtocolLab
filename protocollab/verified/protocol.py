@@ -1,8 +1,9 @@
 """ProtocolLab verified lifecycle kernel protocol and data models."""
 
 from __future__ import annotations
+
 from enum import Enum
-from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 MAX_SAFE_INT = 9_007_199_254_740_991
@@ -39,7 +40,9 @@ class Charge(BaseModel):
                 raise ValueError("Pending charge requires non-negative 'tokens'")
         elif self.kind == ChargeKind.SETTLED:
             if self.input_tokens is None or self.output_tokens is None or self.receipt_hash is None:
-                raise ValueError("Settled charge requires 'input_tokens', 'output_tokens', and 'receipt_hash'")
+                raise ValueError(
+                    "Settled charge requires 'input_tokens', 'output_tokens', and 'receipt_hash'"
+                )
         elif self.kind == ChargeKind.RELEASED:
             if self.evidence_hash is None:
                 raise ValueError("Released charge requires 'evidence_hash'")

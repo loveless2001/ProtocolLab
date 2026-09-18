@@ -6,7 +6,6 @@ from dataclasses import asdict
 from typing import Any
 
 from protocollab.actor import FrozenModelPort, ModelPortConfig, build_packet
-from protocollab.actor.budget import DiagnosticLedger
 from protocollab.actor.diagnostic import (
     DiagnosticThresholds,
     StageResult,
@@ -50,7 +49,8 @@ class ActorDiagnosticHarness:
 
     def _get_ledger(self, store: Any, config: DiagnosticConfig) -> Any:
         config_hash = digest(config.model_dump())
-        from protocollab.verified import VerifiedLifecycleOwner, LifecycleMode
+        from protocollab.verified import LifecycleMode, VerifiedLifecycleOwner
+
         mode = getattr(config, "lifecycle_mode", LifecycleMode.SHADOW)
         return VerifiedLifecycleOwner(store, config.run_id, config.budget_allocation, config_hash, mode=mode)
 

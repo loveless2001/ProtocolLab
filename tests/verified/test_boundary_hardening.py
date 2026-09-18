@@ -1,17 +1,17 @@
 """Boundary and shell hardening tests based on independent review probes."""
 
 from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
 from protocollab.actor.budget import DiagnosticBudgetAllocation, StageBudgetLimits
 from protocollab.verified.lifecycle_owner import VerifiedLifecycleOwner
 from protocollab.verified.protocol import (
+    MAX_SAFE_INT,
     Charge,
-    ChargeKind,
     LedgerState,
     LifecycleMode,
-    MAX_SAFE_INT,
     StageLimit,
     VerdictKind,
 )
@@ -20,11 +20,13 @@ from protocollab.verified.protocol import (
 class DummyStore:
     def __init__(self):
         self.records = []
+        self.data = {}
 
     def get(self, table: str, key: str):
-        return None
+        return self.data.get((table, key))
 
     def set(self, table: str, key: str, payload: Any, kind: str):
+        self.data[(table, key)] = payload
         self.records.append((table, key, payload, kind))
 
 
@@ -47,6 +49,30 @@ class FaultyBridge:
         if self.should_fail:
             raise RuntimeError("SIMULATED_BRIDGE_UNAVAILABLE")
         from types import SimpleNamespace
+
+        from protocollab.verified.protocol import Charge, ChargeKind, RequestRecord, TransportState
+
+        if event.get("kind") == "Reserve":
+            s = state.model_copy(deep=True)
+            r = RequestRecord(
+                req_id=event["req_id"],
+                stage=event["stage"],
+                basis_ref=event.get("basis_ref", ""),
+                config_hash=event.get("config_hash", ""),
+                max_input=event.get("max_input", 0),
+                max_output=event.get("max_output", 0),
+                transport=TransportState.PREPARED,
+                charge=Charge(
+                    kind=ChargeKind.PENDING,
+                    tokens=event.get("max_input", 0) + event.get("max_output", 0),
+                ),
+            )
+            s.requests.insert(0, r)
+            return SimpleNamespace(
+                state=s,
+                verdict=SimpleNamespace(kind=VerdictKind.ACCEPTED, intent=None, reason=None),
+            )
+
         return SimpleNamespace(
             state=state,
             verdict=SimpleNamespace(kind=VerdictKind.ACCEPTED, intent=None, reason=None),
@@ -246,3 +272,102 @@ def test_mutation_classifier_distinguishes_genuine_from_accidental_errors():
     assert classify(139, "", "Segmentation fault") is False
     # Success without magic string: rejected
     assert classify(0, "checked successfully", "") is False
+
+
+def test_lifecycle_owner_duplicate_completion_with_next_pending():
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=5, max_tokens=500)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=1000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="test_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+
+    owner.reserve("stage1", 160, req_id="r1")
+    owner.reserve("stage1", 160, req_id="r2")
+
+    # Complete r1 with receipt_hash
+    owner.record_completed("stage1", 60, 10, 160, receipt_hash="receipt-r1")
+    assert bridge.events[-1]["req_id"] == "r1"
+
+    # Replay completion with same receipt_hash: must match r1, NOT mistakenly complete pending r2!
+    owner.record_completed("stage1", 60, 10, 160, receipt_hash="receipt-r1")
+    assert bridge.events[-1]["req_id"] == "r1"
+
+    # Subsequent completion for r2 routes to r2
+    owner.record_completed("stage1", 60, 10, 160, receipt_hash="receipt-r2")
+    assert bridge.events[-1]["req_id"] == "r2"
+
+
+def test_lifecycle_owner_state_reconstruction_on_restart():
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=5, max_tokens=500)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=1000,
+    )
+    store = DummyStore()
+    bridge1 = FaultyBridge()
+    owner1 = VerifiedLifecycleOwner(
+        store=store,
+        run_id="restart_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge1,
+    )
+    owner1.reserve("stage1", 160, req_id="r_persisted")
+
+    # Reconstruct owner from existing store snapshot
+    bridge2 = FaultyBridge()
+    owner2 = VerifiedLifecycleOwner(
+        store=store,
+        run_id="restart_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge2,
+    )
+    # Anonymous completion must route to reconstructed r_persisted, not generate a new ID
+    owner2.record_completed("stage1", 60, 10, 160)
+    assert bridge2.events[-1]["req_id"] == "r_persisted"
+
+
+def test_lifecycle_owner_quarantine_evidence_retention():
+    class ConflictBridge(FaultyBridge):
+        def apply(self, state, event):
+            from types import SimpleNamespace
+            s = state.model_copy(deep=True)
+            s.fault = "CONFLICTING_USAGE_AFTER_RELEASE"
+            return SimpleNamespace(
+                state=s,
+                verdict=SimpleNamespace(kind=VerdictKind.CONFLICT_FAULT, intent=None, reason=s.fault),
+            )
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=5, max_tokens=500)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=1000,
+    )
+    store = DummyStore()
+    owner = VerifiedLifecycleOwner(
+        store=store,
+        run_id="quarantine_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=ConflictBridge(),
+    )
+    with pytest.raises(RuntimeError) as exc_info:
+        owner.record_completed("stage1", 60, 10, 160, req_id="r1", receipt_hash="QUARANTINE_RECEIPT_999")
+    assert "CONFLICTING_USAGE_AFTER_RELEASE" in str(exc_info.value)
+
+    # Verify quarantine evidence is stored
+    found_receipt = any("QUARANTINE_RECEIPT_999" in str(rec) for rec in store.records)
+    assert found_receipt, "Quarantine receipt evidence must be persisted in store records!"

@@ -205,8 +205,9 @@ The runtime architecture maintains separation between the purely functional veri
 - **Subprocess Startup:** Persistent daemon spawned once per session (~150ms startup).
 - **Transaction Overhead:** Sub-millisecond execution (< 0.8ms per `apply` command over stdio pipe).
 - **Exact Numeric Representation:** All tokens and counts mapped to `BigInt` across JSON wire format, guarded by `MAX_SAFE_INT = 9_007_199_254_740_991` to prevent JS float precision loss.
-- **Stage-Isolated Request Tracking:** `VerifiedLifecycleOwner` maintains FIFO request queues per stage (`_stage_active_req_ids`) and tracks completed requests (`_stage_last_completed`), preventing duplicate or replayed completions from leaking across stages and eliminating ambiguity between multiple same-stage requests.
-- **Transactional Ledger Updates:** `_sync` serializes state persistence by acquiring `store.lock` when available.
+- **Stage-Isolated Request Tracking & Receipt Mapping:** `VerifiedLifecycleOwner` maintains FIFO request queues per stage (`_stage_active_req_ids`), maps receipt hashes to settled requests (`_receipt_to_req_id`), and tracks completed requests (`_stage_last_completed`). This prevents duplicate or replayed completions from consuming pending requests in the active queue. `_reconstruct_routing()` automatically reconstructs all routing mappings upon process restart.
+- **Multi-Owner Atomic Concurrency:** `_apply_bridge` acquires `store.lock` (when available), refreshes the latest state snapshot via `_refresh_state()`, applies the transition, and commits atomically, preventing lost updates across concurrent owners.
+- **Quarantine Audit Persistence:** Conflicting usage settlements after release trigger `CONFLICT_FAULT` and write complete audit evidence (`receipt_hash`, token metrics, fault reason) to the `verified_quarantine_records` journal table before raising `RuntimeError`.
 - **Fail-Safe Shadow Execution:** All shadow-mode bridge calls (including initialization and transitions) are wrapped in non-propagating exception handlers with warning logs, ensuring bridge errors never fail production callers.
 - **Pydantic Variant Validation:** `Charge` strictly validates required variant fields and rejects negative tokens or incomplete settled charges.
 - **Authentic Mutation Classifier:** `scripts/verified_kernel/mutate.py` requires clean exit code 1 with explicit type-checker mismatch markers (`expected` / `observed`), strictly rejecting compiler crashes, syntax errors, or unannotated import errors.
@@ -238,7 +239,7 @@ Existing ProtocolLab components rely on journal event kinds and the `DiagnosticL
 1. **Journal Events Preserved:** `llm.requested`, `llm.input_delivered`, `llm.completed`, `diagnostic.admission_attempted`, `diagnostic.call_reserved`, `diagnostic.call_completed`, etc.
 2. **State Projection:** `owner.state` dynamically yields an immutable, validated `DiagnosticLedgerState` with exact stage breakdown.
 3. **Automated Test Results:**
-   - `pytest tests/verified/`: **38 / 38 passed** (11 mutations, 16 reference traces, 11 boundary hardening tests).
+   - `pytest tests/verified/`: **41 / 41 passed** (11 mutations, 16 reference traces, 14 boundary hardening tests).
    - `pytest tests/test_negative_cases.py tests/test_actor_diagnostic.py tests/test_budget_per_request.py tests/test_diagnostic_budget_ledger.py`: **43 / 43 passed**.
    - Total regression test pass rate: **100%**.
 

@@ -1,12 +1,13 @@
 """Subprocess bridge communicating with verified kernel runner via stdio."""
 
 from __future__ import annotations
+
 import atexit
 import json
 import os
-from pathlib import Path
 import subprocess
 import threading
+from pathlib import Path
 from typing import Any
 
 from protocollab.verified.codec import (
@@ -24,7 +25,9 @@ from protocollab.verified.protocol import (
 
 BUN_BIN = Path(os.environ.get("BUN_PATH", "/home/lenovo/.bun/bin/bun"))
 BEND_APP = Path(os.environ.get("BEND_APP", "/home/lenovo/.bend/app/2.0.5/AdMsHi/bend2/main.ts"))
-RUNNER_SCRIPT = Path(__file__).resolve().parent.parent.parent / "scripts" / "verified_kernel" / "runner.mjs"
+RUNNER_SCRIPT = (
+    Path(__file__).resolve().parent.parent.parent / "scripts" / "verified_kernel" / "runner.mjs"
+)
 
 
 class VerifiedKernelBridge:
@@ -96,10 +99,7 @@ class VerifiedKernelBridge:
         agg_max_tokens: int,
         stage_limits: list[StageLimit | dict[str, Any]],
     ) -> LedgerState:
-        limits_raw = [
-            sl.model_dump() if isinstance(sl, StageLimit) else sl
-            for sl in stage_limits
-        ]
+        limits_raw = [sl.model_dump() if isinstance(sl, StageLimit) else sl for sl in stage_limits]
         cmd = {
             "cmd": "init",
             "run_id": run_id,
