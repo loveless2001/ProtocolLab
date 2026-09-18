@@ -303,13 +303,7 @@ def apply_settle.step(
             max_input, max_output, input_tokens, output_tokens, receipt_hash
           )
         case T.ChargeReleased{ev_hash}:
-          actual = Nat.add(input_tokens, output_tokens)
-          max_bound = Nat.add(max_input, max_output)
-          is_overflow = Nat.is_gt(actual, max_bound)
-          check_settle_overflow(
-            is_overflow, state, id, stage, basis_ref, config_hash,
-            max_input, max_output, input_tokens, output_tokens, receipt_hash
-          )
+          T.TransResult{state, T.Rejected{"CANNOT_SETTLE_RELEASED_REQUEST"}}
 
 def apply_settle.find_step(
   existing: Maybe<&2, T.RequestRecord>,
@@ -356,17 +350,49 @@ def apply_timeout.step(
     case Some{rec}:
       match rec:
         case T.ReqRecord{id, stage, basis_ref, config_hash, max_input, max_output, transport, charge}:
-          match state:
-            case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
-              updated = {T.ReqRecord{
-                id, stage, basis_ref, config_hash, max_input, max_output,
-                T.OutcomeUnknown{},
-                charge
-              } : T.RequestRecord}
-              T.TransResult{
-                T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
-                T.Accepted{None{}}
-              }
+          match transport:
+            case T.ResponseReceived{}:
+              T.TransResult{state, T.DuplicateNoop{}}
+            case T.ProvenNotSent{}:
+              T.TransResult{state, T.Rejected{"ALREADY_FAILED"}}
+            case T.OutcomeUnknown{}:
+              T.TransResult{state, T.DuplicateNoop{}}
+            case T.Prepared{}:
+              match state:
+                case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
+                  updated = {T.ReqRecord{
+                    id, stage, basis_ref, config_hash, max_input, max_output,
+                    T.OutcomeUnknown{},
+                    charge
+                  } : T.RequestRecord}
+                  T.TransResult{
+                    T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
+                    T.Accepted{None{}}
+                  }
+            case T.DispatchedIntent{}:
+              match state:
+                case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
+                  updated = {T.ReqRecord{
+                    id, stage, basis_ref, config_hash, max_input, max_output,
+                    T.OutcomeUnknown{},
+                    charge
+                  } : T.RequestRecord}
+                  T.TransResult{
+                    T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
+                    T.Accepted{None{}}
+                  }
+            case T.Sent{}:
+              match state:
+                case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
+                  updated = {T.ReqRecord{
+                    id, stage, basis_ref, config_hash, max_input, max_output,
+                    T.OutcomeUnknown{},
+                    charge
+                  } : T.RequestRecord}
+                  T.TransResult{
+                    T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
+                    T.Accepted{None{}}
+                  }
 
 def apply_timeout(state: T.LedgerState, req_id: String, reason: String) -> T.TransitionResult:
   match state:
@@ -439,17 +465,49 @@ def apply_transport.step(
     case Some{rec}:
       match rec:
         case T.ReqRecord{id, stage, basis_ref, config_hash, max_input, max_output, transport, charge}:
-          match state:
-            case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
-              updated = {T.ReqRecord{
-                id, stage, basis_ref, config_hash, max_input, max_output,
-                T.Sent{},
-                charge
-              } : T.RequestRecord}
-              T.TransResult{
-                T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
-                T.Accepted{None{}}
-              }
+          match transport:
+            case T.ResponseReceived{}:
+              T.TransResult{state, T.DuplicateNoop{}}
+            case T.ProvenNotSent{}:
+              T.TransResult{state, T.Rejected{"ALREADY_FAILED"}}
+            case T.Sent{}:
+              T.TransResult{state, T.DuplicateNoop{}}
+            case T.Prepared{}:
+              match state:
+                case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
+                  updated = {T.ReqRecord{
+                    id, stage, basis_ref, config_hash, max_input, max_output,
+                    T.Sent{},
+                    charge
+                  } : T.RequestRecord}
+                  T.TransResult{
+                    T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
+                    T.Accepted{None{}}
+                  }
+            case T.DispatchedIntent{}:
+              match state:
+                case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
+                  updated = {T.ReqRecord{
+                    id, stage, basis_ref, config_hash, max_input, max_output,
+                    T.Sent{},
+                    charge
+                  } : T.RequestRecord}
+                  T.TransResult{
+                    T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
+                    T.Accepted{None{}}
+                  }
+            case T.OutcomeUnknown{}:
+              match state:
+                case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
+                  updated = {T.ReqRecord{
+                    id, stage, basis_ref, config_hash, max_input, max_output,
+                    T.Sent{},
+                    charge
+                  } : T.RequestRecord}
+                  T.TransResult{
+                    T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
+                    T.Accepted{None{}}
+                  }
 
 def apply_transport(state: T.LedgerState, req_id: String, boundary: String) -> T.TransitionResult:
   match state:

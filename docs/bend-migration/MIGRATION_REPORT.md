@@ -48,16 +48,16 @@ The verified kernel execution and proof verification environment is pinned via `
       "bytes": 7183
     },
     "Kernel.bend": {
-      "sha256": "ae85e135beea7813a483e586dd7d2ce892eb5f32b84cf227318712dbd46cfcbe",
-      "bytes": 18999
+      "sha256": "3fb637993b8d7c3b40ee781a0b21d10d072ffbb3de36b7839c892f2a2733c86e",
+      "bytes": 21983
     },
     "LAWS.bend": {
-      "sha256": "63a863b78ec968f9be305d2e209825b59eb61616cfd0eb4b84b722d56a29ec62",
-      "bytes": 6224
+      "sha256": "b79ac5d5637ebd7057737cf4d0e0f100840a9b86409118ea1c464e17fce9a9a0",
+      "bytes": 6520
     },
     "PROOF.bend": {
-      "sha256": "3cb49a4632db2f26038891fcff28532f7a9ca532c53aeb1a64b9173d1f3b890a",
-      "bytes": 1391
+      "sha256": "077f1dd7975dd8d3c558bcb0718b7c990785302899f08a32b4cdf681869cd530",
+      "bytes": 1411
     }
   }
 }
@@ -91,24 +91,38 @@ where $\text{TransitionResult} = (\text{LedgerState}, \text{TransitionVerdict})$
 
 ### Formal Laws & Verification Matrix
 
-| Identifier | Law Name | Formal Theorem Statement | Prover Output |
+All 12 laws and 4 witnesses in `verified/lifecycle/LAWS.bend` are proved via compile-time term reduction in `verified/lifecycle/PROOF.bend`:
+
+| Identifier | Law Name | Machine-Checked Property Statement | Prover Output |
 | :--- | :--- | :--- | :--- |
-| **LAW-1** | `replay_deterministic` | $\forall evs, s.\ \text{fold}(evs, s) = \text{fold}(evs, s)$ | `All terms check.` |
-| **LAW-2** | `nonnegative_totals` | $\forall s \in \mathcal{S}_{valid}.\ \text{held}(s) \ge 0 \land \text{spent}(s) \ge 0$ | `All terms check.` |
-| **LAW-3** | `reservation_conservation` | Holding equals $mi + mo$; Settle shifts held to spent; Release shifts held to 0 | `All terms check.` |
-| **LAW-4** | `settlement_monotonic` | $\forall s \xrightarrow{\text{settle}} s'.\ \text{spent}(s') \ge \text{spent}(s)$ | `All terms check.` |
-| **LAW-5** | `single_flight_dispatch` | Second dispatch intent on in-flight request is `DuplicateNoop` | `All terms check.` |
-| **LAW-6** | `unresolved_isolation` | Timeout transitions transport to `OutcomeUnknown` but preserves held reservation | `All terms check.` |
+| **LAW-1** | `replay_deterministic` | `{fold(events, initial) == fold(events, initial)}` (Syntactic fold reflexivity) | `All terms check.` |
+| **LAW-2** | `nonnegative_totals` | Clean, reserved, and settled states satisfy `held >= 0` and `spent >= 0` | `All terms check.` |
+| **LAW-3** | `reservation_conservation` | Reserved holds 150; Settled shifts to 70 spent, 0 held; Released shifts to 0/0 | `All terms check.` |
+| **LAW-4** | `settlement_monotonic` | Settled state spent tokens (70) $\ge$ pre-settlement transported spent tokens (0) | `All terms check.` |
+| **LAW-5** | `single_flight_dispatch` | Duplicate dispatch on dispatched request evaluates to `DuplicateNoop{}` | `All terms check.` |
+| **LAW-6** | `unresolved_isolation` | Timeout preserves pending reservation tokens (150 held, 0 spent) | `All terms check.` |
 | **LAW-7** | `conflict_immunity` | Conflicting reservation parameters latch `CONFLICTING_REQUEST_IDENTITY` | `All terms check.` |
 | **LAW-8** | `bound_honoring` | Overrun beyond $mi + mo$ latches `BOUND_VIOLATION_FAULT` and counts actual tokens | `All terms check.` |
 | **LAW-9** | `terminal_finality` | Settled request rejects release as failed (`CANNOT_RELEASE_SETTLED_REQUEST`) | `All terms check.` |
 | **LAW-10** | `fault_latching` | Faulted state rejects all subsequent transitions with `STATE_FAULT_LATCHED` | `All terms check.` |
-| **LAW-11** | `cross_stage_independence` | Transitions in Stage A leave Stage B calls, spent, and held completely invariant | `All terms check.` |
-| **LAW-12** | `evidence_integrity` | Re-submitting identical conclusive failure evidence returns `DuplicateNoop` | `All terms check.` |
-| **WIT-1** | `witness_positive_settlement` | Clean sequence $[R, D, T, S]$ reaches `Accepted` with exact token settlement | `All terms check.` |
-| **WIT-2** | `witness_positive_release` | Clean sequence $[R, F]$ returns reserved tokens to available balance | `All terms check.` |
-| **WIT-3** | `witness_positive_timeout` | Clean sequence $[R, TO]$ isolates unresolved charge without free capacity | `All terms check.` |
-| **WIT-4** | `witness_multi_stage_completion` | Multi-stage interleaving completes with independent stage limits intact | `All terms check.` |
+| **LAW-11** | `cross_stage_independence` | Stage 1 settlement leaves Stage 2 calls, spent, and held invariant | `All terms check.` |
+| **LAW-12** | `evidence_integrity` | Re-submitting identical conclusive failure evidence evaluates to `DuplicateNoop{}` | `All terms check.` |
+| **WIT-1** | `witness_positive_settlement` | Clean sequence $[R, D, T, S]$ reaches `Accepted` with exact token settlement (70 spent, 0 held) | `All terms check.` |
+| **WIT-2** | `witness_positive_release` | Clean sequence $[R, F]$ returns reserved tokens to available balance (0 spent, 0 held) | `All terms check.` |
+| **WIT-3** | `witness_positive_timeout` | Clean sequence $[R, TO]$ isolates unresolved charge without free capacity (150 held) | `All terms check.` |
+| **WIT-4** | `witness_multi_stage_completion` | Multi-stage interleaving completes with independent stage limits intact (70 s1, 50 s2) | `All terms check.` |
+
+### Formal Verification Scope & Semantics
+
+1. **Ground Term Proofs vs. Universal Quantification:**
+   - In Bend 2.0.5, type-directed evaluation computes normal forms of closed expressions at compile time.
+   - Law 1 (`replay_deterministic`) structurally quantifies over arbitrary event lists and states, proving syntactic reflexivity of `fold`.
+   - Laws 2–12 and Witnesses 1–4 are **ground instance theorems / verified trace invariants** evaluated over canonical reference sequences (`fixture_clean_state()`, `state_reserved()`, `state_settled()`, etc.). They establish that real execution traces strictly satisfy the invariant properties without axiomatic holes (`?TODO`) or `@unsafe` escapes.
+   - Full universal quantification over unbounded inductive lists is not automated in Bend 2.0.5 and would require manual inductive encoding; ground instance theorems provide exact, machine-checked trace safety.
+
+2. **Hardened Kernel State Machine Invariants (Post-Review):**
+   - **Terminal Release Rejection:** Settling a request that was previously released (`ChargeReleased` / `ProvenNotSent`) is strictly rejected with `Rejected{"CANNOT_SETTLE_RELEASED_REQUEST"}`. This prevents late settlement from exceeding reallocated stage or aggregate token limits.
+   - **Transport Monotonicity:** Terminal transport state `ResponseReceived` is immutable: subsequent `EvTimeoutUnknown` or `EvTransportObserved` events evaluate to `DuplicateNoop{}` and cannot regress transport state to `OutcomeUnknown` or `Sent`.
 
 ---
 
@@ -187,10 +201,13 @@ The runtime architecture maintains separation between the purely functional veri
                                       └───────────────────────────────────┘
 ```
 
-### Measured Performance
+### Measured Performance & Boundary Hardening
 - **Subprocess Startup:** Persistent daemon spawned once per session (~150ms startup).
 - **Transaction Overhead:** Sub-millisecond execution (< 0.8ms per `apply` command over stdio pipe).
-- **Exact Numeric Representation:** All tokens and counts mapped to `BigInt` across JSON wire format; zero float precision loss.
+- **Exact Numeric Representation:** All tokens and counts mapped to `BigInt` across JSON wire format, guarded by `MAX_SAFE_INT = 9_007_199_254_740_991` to prevent JS float precision loss.
+- **Stage-Isolated Request Tracking:** `VerifiedLifecycleOwner` tracks active request IDs per stage (`_stage_active_req_ids`), correctly routing completions during interleaved multi-stage executions.
+- **Fail-Safe Shadow Execution:** All shadow-mode bridge calls are wrapped in non-propagating exception handlers with warning logs, ensuring bridge errors never fail production callers.
+- **Pydantic Variant Validation:** `Charge` strictly validates required variant fields and rejects negative tokens or incomplete settled charges.
 
 ---
 
@@ -219,8 +236,8 @@ Existing ProtocolLab components rely on journal event kinds and the `DiagnosticL
 1. **Journal Events Preserved:** `llm.requested`, `llm.input_delivered`, `llm.completed`, `diagnostic.admission_attempted`, `diagnostic.call_reserved`, `diagnostic.call_completed`, etc.
 2. **State Projection:** `owner.state` dynamically yields an immutable, validated `DiagnosticLedgerState` with exact stage breakdown.
 3. **Automated Test Results:**
-   - `pytest tests/verified/`: **24 / 24 passed** (8.22s)
-   - `pytest -k "budget or harness or mode or negative"`: **49 / 49 passed** (24.44s)
+   - `pytest tests/verified/`: **34 / 34 passed** (11 mutations, 16 reference traces, 7 boundary hardening tests).
+   - `pytest tests/test_negative_cases.py tests/test_actor_diagnostic.py tests/test_budget_per_request.py tests/test_diagnostic_budget_ledger.py`: **43 / 43 passed**.
    - Total regression test pass rate: **100%**.
 
 ---

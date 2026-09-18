@@ -38,15 +38,15 @@ MUTATIONS: dict[str, tuple[str, str, str]] = {
     "MUTATION_EARLY_RELEASE": (
         "Zeros reservation on timeout instead of preserving pending charge",
         """updated = {T.ReqRecord{
-                id, stage, basis_ref, config_hash, max_input, max_output,
-                T.OutcomeUnknown{},
-                charge
-              } : T.RequestRecord}""",
+                    id, stage, basis_ref, config_hash, max_input, max_output,
+                    T.OutcomeUnknown{},
+                    charge
+                  } : T.RequestRecord}""",
         """updated = {T.ReqRecord{
-                id, stage, basis_ref, config_hash, max_input, max_output,
-                T.OutcomeUnknown{},
-                T.ChargeReleased{""}
-              } : T.RequestRecord}"""
+                    id, stage, basis_ref, config_hash, max_input, max_output,
+                    T.OutcomeUnknown{},
+                    T.ChargeReleased{""}
+                  } : T.RequestRecord}"""
     ),
     "MUTATION_SILENT_OVERWRITE": (
         "Overwrites conflicting request identity without latching fault",
@@ -184,16 +184,26 @@ def check_mutation_breaks_proof(mutation_name: str, kernel_dir: Path) -> tuple[b
         (tmp_path / "Kernel.bend").write_text(mutated_kernel)
         
         # Run bend PROOF.bend
-        env = {"HOME": str(Path.home()), "BEND_NO_TELEMETRY": "1"}
+        import os
+        env = dict(os.environ)
+        env["HOME"] = str(Path.home())
+        env["BEND_NO_TELEMETRY"] = "1"
         res = subprocess.run(
             ["/home/lenovo/.bend/bin/bend", str(tmp_path / "PROOF.bend")],
             capture_output=True,
             text=True,
             env=env
         )
-        # It should FAIL (exit != 0 or output does not contain "All terms check.")
-        passed = (res.returncode != 0) or ("All terms check." not in res.stdout)
         output = res.stdout + res.stderr
+        # Check for toolchain crashes (segfault, abort)
+        if res.returncode in (139, 134, -11, -6):
+            return False, f"Toolchain crashed with returncode {res.returncode}:\n{output}"
+        # Authentic catch requires non-zero exit code indicating type/proof mismatch
+        passed = (
+            (res.returncode != 0)
+            and ("All terms check." not in res.stdout)
+            and ("Error:" in output or "mismatch" in output.lower())
+        )
         return passed, output
 
 

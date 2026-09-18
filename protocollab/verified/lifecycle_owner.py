@@ -57,6 +57,7 @@ class VerifiedLifecycleOwner:
         # Active request ID tracking for stage-level legacy calls
         self._current_req_id: str | None = None
         self._request_stages: dict[str, str] = {}
+        self._stage_active_req_ids: dict[str, str] = {}
 
         # Initialize or load verified ledger state
         stored = store.get("verified_lifecycle_ledger", run_id)
@@ -180,6 +181,7 @@ class VerifiedLifecycleOwner:
             req_id = f"req_{uuid.uuid4().hex[:12]}"
         self._current_req_id = req_id
         self._request_stages[req_id] = stage
+        self._stage_active_req_ids[stage] = req_id
 
         if max_input is None or max_output is None:
             mi = reservation_tokens // 2
@@ -208,14 +210,17 @@ class VerifiedLifecycleOwner:
                     res = self.bridge.apply(self.bend_state, ev)
                     self.bend_state = res.state
                     self._sync("verified.call_reserved_shadow")
-                except Exception:
-                    pass
+                except Exception as shadow_err:
+                    logger.warning("Verified shadow kernel reserve failed: %s", shadow_err)
                 raise legacy_err
 
             # Shadow transition
-            res = self.bridge.apply(self.bend_state, ev)
-            self.bend_state = res.state
-            self._sync("verified.call_reserved_shadow")
+            try:
+                res = self.bridge.apply(self.bend_state, ev)
+                self.bend_state = res.state
+                self._sync("verified.call_reserved_shadow")
+            except Exception as shadow_err:
+                logger.warning("Verified shadow kernel reserve failed: %s", shadow_err)
         else:
             res = self.bridge.apply(self.bend_state, ev)
             self.bend_state = res.state
@@ -226,7 +231,7 @@ class VerifiedLifecycleOwner:
                 raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
 
     def record_dispatched(self, stage: str, req_id: str | None = None):
-        target_id = req_id or self._current_req_id
+        target_id = req_id or self._stage_active_req_ids.get(stage) or self._current_req_id
         if target_id is None:
             target_id = f"req_{uuid.uuid4().hex[:12]}"
 
@@ -234,9 +239,12 @@ class VerifiedLifecycleOwner:
 
         if self.mode == LifecycleMode.SHADOW:
             self.legacy_ledger.record_dispatched(stage)
-            res = self.bridge.apply(self.bend_state, ev)
-            self.bend_state = res.state
-            self._sync("verified.call_dispatched_shadow")
+            try:
+                res = self.bridge.apply(self.bend_state, ev)
+                self.bend_state = res.state
+                self._sync("verified.call_dispatched_shadow")
+            except Exception as shadow_err:
+                logger.warning("Verified shadow kernel record_dispatched failed: %s", shadow_err)
         else:
             res = self.bridge.apply(self.bend_state, ev)
             self.bend_state = res.state
@@ -255,7 +263,9 @@ class VerifiedLifecycleOwner:
         req_id: str | None = None,
         receipt_hash: str = "receipt_default",
     ):
-        target_id = req_id or self._current_req_id or f"req_{uuid.uuid4().hex[:12]}"
+        target_id = req_id or self._stage_active_req_ids.get(stage) or self._current_req_id or f"req_{uuid.uuid4().hex[:12]}"
+        if self._stage_active_req_ids.get(stage) == target_id:
+            self._stage_active_req_ids.pop(stage, None)
 
         ev = {
             "kind": "SettleUsage",
@@ -269,9 +279,12 @@ class VerifiedLifecycleOwner:
             self.legacy_ledger.record_completed(
                 stage, input_tokens, output_tokens, reservation_tokens
             )
-            res = self.bridge.apply(self.bend_state, ev)
-            self.bend_state = res.state
-            self._sync("verified.call_completed_shadow")
+            try:
+                res = self.bridge.apply(self.bend_state, ev)
+                self.bend_state = res.state
+                self._sync("verified.call_completed_shadow")
+            except Exception as shadow_err:
+                logger.warning("Verified shadow kernel record_completed failed: %s", shadow_err)
         else:
             res = self.bridge.apply(self.bend_state, ev)
             self.bend_state = res.state
@@ -288,7 +301,10 @@ class VerifiedLifecycleOwner:
         req_id: str | None = None,
         evidence_hash: str = "conclusive_failure",
     ):
-        target_id = req_id or self._current_req_id or f"req_{uuid.uuid4().hex[:12]}"
+        target_id = req_id or self._stage_active_req_ids.get(stage) or self._current_req_id or f"req_{uuid.uuid4().hex[:12]}"
+        if self._stage_active_req_ids.get(stage) == target_id:
+            self._stage_active_req_ids.pop(stage, None)
+
         ev = {
             "kind": "FailureConclusive",
             "req_id": target_id,
@@ -297,9 +313,12 @@ class VerifiedLifecycleOwner:
 
         if self.mode == LifecycleMode.SHADOW:
             self.legacy_ledger.record_failed(stage, reservation_tokens)
-            res = self.bridge.apply(self.bend_state, ev)
-            self.bend_state = res.state
-            self._sync("verified.call_failed_shadow")
+            try:
+                res = self.bridge.apply(self.bend_state, ev)
+                self.bend_state = res.state
+                self._sync("verified.call_failed_shadow")
+            except Exception as shadow_err:
+                logger.warning("Verified shadow kernel record_failed failed: %s", shadow_err)
         else:
             res = self.bridge.apply(self.bend_state, ev)
             self.bend_state = res.state
@@ -312,7 +331,7 @@ class VerifiedLifecycleOwner:
         req_id: str | None = None,
         reason: str = "timeout",
     ):
-        target_id = req_id or self._current_req_id or f"req_{uuid.uuid4().hex[:12]}"
+        target_id = req_id or self._stage_active_req_ids.get(stage) or self._current_req_id or f"req_{uuid.uuid4().hex[:12]}"
         ev = {
             "kind": "TimeoutUnknown",
             "req_id": target_id,
@@ -322,9 +341,12 @@ class VerifiedLifecycleOwner:
         if self.mode == LifecycleMode.SHADOW:
             # In legacy ledger, timeouts were zeroed via record_failed
             self.legacy_ledger.record_failed(stage, reservation_tokens)
-            res = self.bridge.apply(self.bend_state, ev)
-            self.bend_state = res.state
-            self._sync("verified.call_timeout_shadow")
+            try:
+                res = self.bridge.apply(self.bend_state, ev)
+                self.bend_state = res.state
+                self._sync("verified.call_timeout_shadow")
+            except Exception as shadow_err:
+                logger.warning("Verified shadow kernel record_timeout failed: %s", shadow_err)
         else:
             res = self.bridge.apply(self.bend_state, ev)
             self.bend_state = res.state

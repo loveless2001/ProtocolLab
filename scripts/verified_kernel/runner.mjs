@@ -36,6 +36,15 @@ export function bendToMaybe(m) {
   return null;
 }
 
+export function safeNumber(val) {
+  if (val === null || val === undefined) return val;
+  const bi = BigInt(val);
+  if (bi > BigInt(Number.MAX_SAFE_INTEGER) || bi < -BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new RangeError(`Integer ${bi} exceeds JS Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER})`);
+  }
+  return Number(bi);
+}
+
 export function stageLimitToBend(sl) {
   return {
     $: "SLimit",
@@ -48,8 +57,8 @@ export function stageLimitToBend(sl) {
 export function stageLimitFromBend(sl) {
   return {
     stage: sl.stage,
-    max_calls: Number(sl.max_calls),
-    max_tokens: Number(sl.max_tokens)
+    max_calls: safeNumber(sl.max_calls),
+    max_tokens: safeNumber(sl.max_tokens)
   };
 }
 
@@ -95,13 +104,13 @@ export function chargeFromBend(ch) {
   let tag = ch.$;
   if (tag.startsWith("Types.")) tag = tag.slice(6);
   if (tag === "ChargePending") {
-    return { kind: "Pending", tokens: Number(ch.tokens) };
+    return { kind: "Pending", tokens: safeNumber(ch.tokens) };
   }
   if (tag === "ChargeSettled") {
     return {
       kind: "Settled",
-      input_tokens: Number(ch.input_tokens),
-      output_tokens: Number(ch.output_tokens),
+      input_tokens: safeNumber(ch.input_tokens),
+      output_tokens: safeNumber(ch.output_tokens),
       receipt_hash: ch.receipt_hash
     };
   }
@@ -131,8 +140,8 @@ export function requestRecordFromBend(rec) {
     stage: rec.stage,
     basis_ref: rec.basis_ref,
     config_hash: rec.config_hash,
-    max_input: Number(rec.max_input),
-    max_output: Number(rec.max_output),
+    max_input: safeNumber(rec.max_input),
+    max_output: safeNumber(rec.max_output),
     transport: transportFromBend(rec.transport),
     charge: chargeFromBend(rec.charge)
   };
@@ -155,8 +164,8 @@ export function stateFromBend(state) {
   return {
     run_id: state.run_id,
     config_hash: state.config_hash,
-    agg_max_calls: Number(state.agg_max_calls),
-    agg_max_tokens: Number(state.agg_max_tokens),
+    agg_max_calls: safeNumber(state.agg_max_calls),
+    agg_max_tokens: safeNumber(state.agg_max_tokens),
     stage_limits: bendListToArray(state.stage_limits).map(stageLimitFromBend),
     requests: bendListToArray(state.requests).map(requestRecordFromBend),
     fault: bendToMaybe(state.fault)
@@ -213,8 +222,8 @@ export function verdictFromBend(verdict) {
         stage: rawIntent.stage,
         basis_ref: rawIntent.basis_ref,
         config_hash: rawIntent.config_hash,
-        max_input: Number(rawIntent.max_input),
-        max_output: Number(rawIntent.max_output)
+        max_input: safeNumber(rawIntent.max_input),
+        max_output: safeNumber(rawIntent.max_output)
       };
     }
     return { kind: "Accepted", intent };
@@ -234,15 +243,15 @@ export function verdictFromBend(verdict) {
 export function summaryFromBend(sum) {
   const stageSummaries = bendListToArray(sum.stage_summaries).map(ss => ({
     stage: ss.stage,
-    calls_admitted: Number(ss.calls_admitted),
-    spent_tokens: Number(ss.spent_tokens),
-    held_tokens: Number(ss.held_tokens),
-    committed_tokens: Number(ss.committed_tokens)
+    calls_admitted: safeNumber(ss.calls_admitted),
+    spent_tokens: safeNumber(ss.spent_tokens),
+    held_tokens: safeNumber(ss.held_tokens),
+    committed_tokens: safeNumber(ss.committed_tokens)
   }));
   return {
-    total_spent: Number(sum.total_spent),
-    total_held: Number(sum.total_held),
-    total_committed: Number(sum.total_committed),
+    total_spent: safeNumber(sum.total_spent),
+    total_held: safeNumber(sum.total_held),
+    total_committed: safeNumber(sum.total_committed),
     stage_summaries: stageSummaries,
     fault: bendToMaybe(sum.fault)
   };

@@ -339,3 +339,69 @@ def test_trace_13_deterministic_replay(bridge, standard_state):
     assert sum1.model_dump() == sum2.model_dump()
     assert sum1.total_spent == 70
     assert sum1.total_held == 0
+
+
+# 14. Released request cannot be settled (prevents budget overrun)
+def test_trace_14_cannot_settle_released_request(bridge):
+    limits = [StageLimit(stage="stage1", max_calls=5, max_tokens=200)]
+    s0 = bridge.init("run_counterexample", "cfg", 10, 200, limits)
+
+    # Reserve r1 (150 tokens)
+    ev_r1 = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg", "max_input": 100, "max_output": 50}
+    s1 = bridge.apply(s0, ev_r1).state
+    assert bridge.summarize(s1).total_held == 150
+
+    # Conclusive failure releases r1 (held drops to 0)
+    ev_fail = {"kind": "FailureConclusive", "req_id": "r1", "evidence_hash": "proof_fail"}
+    s2 = bridge.apply(s1, ev_fail).state
+    assert bridge.summarize(s2).total_held == 0
+
+    # Reserve r2 (150 tokens) - capacity now reallocated to r2
+    ev_r2 = {"kind": "Reserve", "req_id": "r2", "stage": "stage1", "basis_ref": "b2", "config_hash": "cfg", "max_input": 100, "max_output": 50}
+    s3 = bridge.apply(s2, ev_r2).state
+    assert bridge.summarize(s3).total_held == 150
+
+    # Late settlement for released r1 MUST be rejected to protect reallocated budget
+    ev_settle_r1 = {"kind": "SettleUsage", "req_id": "r1", "input_tokens": 60, "output_tokens": 40, "receipt_hash": "rec1"}
+    res = bridge.apply(s3, ev_settle_r1)
+    assert res.verdict.kind == VerdictKind.REJECTED
+    assert res.verdict.reason == "CANNOT_SETTLE_RELEASED_REQUEST"
+
+    # Budget invariant strictly preserved: spent remains 0, held is 150, committed is 150 <= 200
+    sum_res = bridge.summarize(res.state)
+    assert sum_res.total_spent == 0
+    assert sum_res.total_held == 150
+    assert sum_res.total_committed == 150
+
+
+# 15. Settled request transport cannot regress on timeout
+def test_trace_15_settled_request_timeout_idempotent(bridge, standard_state):
+    ev_res = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
+    s1 = bridge.apply(standard_state, ev_res).state
+    ev_settle = {"kind": "SettleUsage", "req_id": "r1", "input_tokens": 40, "output_tokens": 30, "receipt_hash": "rec1"}
+    s2 = bridge.apply(s1, ev_settle).state
+    assert s2.requests[0].transport == TransportState.RESPONSE_RECEIVED
+    assert s2.requests[0].charge.kind == ChargeKind.SETTLED
+
+    # Late timeout on already settled request must be DuplicateNoop
+    ev_timeout = {"kind": "TimeoutUnknown", "req_id": "r1", "reason": "late_gateway_timeout"}
+    res = bridge.apply(s2, ev_timeout)
+    assert res.verdict.kind == VerdictKind.DUPLICATE_NOOP
+    assert res.state.requests[0].transport == TransportState.RESPONSE_RECEIVED
+    assert res.state.requests[0].charge.kind == ChargeKind.SETTLED
+
+
+# 16. Settled request transport cannot regress on transport observation
+def test_trace_16_settled_request_transport_idempotent(bridge, standard_state):
+    ev_res = {"kind": "Reserve", "req_id": "r1", "stage": "stage1", "basis_ref": "b1", "config_hash": "cfg_hash_1", "max_input": 100, "max_output": 50}
+    s1 = bridge.apply(standard_state, ev_res).state
+    ev_settle = {"kind": "SettleUsage", "req_id": "r1", "input_tokens": 40, "output_tokens": 30, "receipt_hash": "rec1"}
+    s2 = bridge.apply(s1, ev_settle).state
+    assert s2.requests[0].transport == TransportState.RESPONSE_RECEIVED
+
+    # Late transport observation on already settled request must be DuplicateNoop
+    ev_trans = {"kind": "TransportObserved", "req_id": "r1", "boundary": "http://late"}
+    res = bridge.apply(s2, ev_trans)
+    assert res.verdict.kind == VerdictKind.DUPLICATE_NOOP
+    assert res.state.requests[0].transport == TransportState.RESPONSE_RECEIVED
+
