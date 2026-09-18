@@ -1,0 +1,78 @@
+{
+  "schema_version": "0.1",
+  "locked_at": "2026-09-18T22:38:00+07:00",
+  "repository": {
+    "name": "ProtocolLab",
+    "baseline_commit": "46f1c34d3400492ae527083a16e0b7120d84e1f5",
+    "branch": "experiment/bend-lifecycle-kernel"
+  },
+  "bend": {
+    "version": "2.0.5",
+    "inspected_source_baseline": "0b7e2b11c1054f5d0f4eb955cadb47997ef1115d",
+    "binary_path": "/home/lenovo/.bend/bin/bend",
+    "binary_sha256": "9feb76828ea448c1388eaab00e193164b507206cdfc8766f3460868d5211e1c8",
+    "source_files": {
+      "main.ts": {
+        "path": "/home/lenovo/.bend/app/2.0.5/AdMsHi/bend2/main.ts",
+        "sha256": "34a8a791b02ce92f247bda4cabcd3ff4eabe500002fedbec4867b5db77ee1feb"
+      },
+      "comp.ts": {
+        "path": "/home/lenovo/.bend/app/2.0.5/AdMsHi/bend2/comp.ts",
+        "sha256": "c181ac038d7f7d4ed0e1bb81c513e64285347627e0b3a13a98cb86a1d1568f54"
+      },
+      "bend.ts": {
+        "path": "/home/lenovo/.bend/app/2.0.5/AdMsHi/bend2/bend.ts",
+        "sha256": "fe3c2b0b306fccbe44efec349d8f339b6efdaceb090b3d3049c74a1a6015c859"
+      },
+      "base.bend": {
+        "path": "/home/lenovo/.bend/app/2.0.5/AdMsHi/bend2/base.bend",
+        "sha256": "b2d53bbd83639c3ae27260b318efa09de9df6006a556ac6ef41c104ea164917a"
+      }
+    }
+  },
+  "runtimes": {
+    "bun": {
+      "version": "1.3.8",
+      "binary_path": "/home/lenovo/.bun/bin/bun",
+      "binary_sha256": "0bb81ea882bce5946a1fc0d26d61880276d81fe22714714b5a2b792bdff8ea7a"
+    },
+    "node": {
+      "version": "v25.5.0",
+      "binary_path": "/home/linuxbrew/.linuxbrew/bin/node",
+      "binary_sha256": "a02cfec83ef3dd2f5b4336a0af91ee80049e7824065a917a294accc3f7c5133a"
+    },
+    "python": {
+      "version": "3.12.3",
+      "virtualenv": ".venv"
+    }
+  },
+  "environment": {
+    "BEND_NO_TELEMETRY": "1"
+  },
+  "feasibility_checks": {
+    "true_theorem_explicit_proof": {
+      "status": "PASSED",
+      "evidence": "bend accepts proof without TODO, exits 0 with 'All terms check.'"
+    },
+    "false_theorem_rejection": {
+      "status": "PASSED",
+      "evidence": "bend outputs expected vs observed mismatch, exits 1"
+    },
+    "unresolved_proof_rejection": {
+      "status": "PASSED",
+      "evidence": "bend outputs '1 TODO found', exits 1"
+    },
+    "enum_list_reducer": {
+      "status": "PASSED",
+      "evidence": "checked and executed via Bend runtime returning exact List structure"
+    },
+    "host_calling_boundary": {
+      "status": "PASSED",
+      "evidence": "Bun/Node bridge accurately translates Bool to native boolean, ADTs to {$:'Name'}, and Nat to BigInt"
+    },
+    "checker_runtime_consistency": {
+      "status": "PASSED",
+      "evidence": "checked definitions agree between bend checker and bun/node module loader"
+    }
+  }
+}
