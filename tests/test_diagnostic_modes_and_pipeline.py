@@ -139,6 +139,7 @@ def test_decision_adapter_executes_candidate_scoring_and_free_json(runtime, monk
                     "token_count": 5,
                 })
             return {
+                "model_id": port_config.model_id,
                 "input_tokens": 50,
                 "output_tokens": 45,
                 "evaluations": evaluations,

@@ -30,6 +30,7 @@ def main():
 
     with torch.inference_mode():
         print(json.dumps({"input_evidence": {"prompt": prompt,
+              "candidates": request.get("candidates", []),
               "input_ids": inputs["input_ids"][0].tolist()}}), flush=True)
 
         op = request.get("op")
@@ -61,6 +62,16 @@ def main():
                     "token_count": cand_len,
                 })
             best = max(evaluations, key=lambda e: (e["score"], -e["index"]))
+            peak_mem = torch.cuda.max_memory_allocated() if torch.cuda.is_available() else None
+            compute_meta = {
+                "logical_decisions": 1,
+                "candidate_evaluations": len(candidates),
+                "prompt_tokens_logically_supplied": count,
+                "total_tokens_processed": count * len(candidates) + total_cand_tokens,
+                "forward_passes": len(candidates),
+                "prefill_recomputations": len(candidates),
+                "peak_memory_bytes": peak_mem,
+            }
             print(json.dumps({
                 "model_id": request["model_id"],
                 "text": best["candidate"],
@@ -69,6 +80,7 @@ def main():
                 "evaluations": evaluations,
                 "winning_candidate": best["candidate"],
                 "fingerprint": None,
+                "compute": compute_meta,
             }))
             return
 

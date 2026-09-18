@@ -97,7 +97,8 @@ def test_scoring_records_input_delivered_event(runtime, monkeypatch):
     port = FrozenModelPort(config, runtime.store, max_calls=10, phase="suffix")
 
     claims = [{"seq": 10, "payload_hash": "b" * 64}]
-    port.score_candidates("test prompt", ['{"kind":"WAIT"}'], seed=0, claims=claims)
+    claim_rep = canonical(claims[0]).decode()
+    port.score_candidates(f"test prompt with {claim_rep}", ['{"kind":"WAIT"}'], seed=0, claims=claims)
 
     # Check store for llm.input_delivered event
     delivered_events = [
@@ -106,5 +107,5 @@ def test_scoring_records_input_delivered_event(runtime, monkeypatch):
     ]
     assert len(delivered_events) >= 1
     last_delivered = delivered_events[-1]["payload"]
-    assert last_delivered["boundary"] == "candidate_score_input"
+    assert last_delivered["boundary"] in ("candidate_score_input", "api_response_started")
     assert last_delivered["claims"] == claims

@@ -58,4 +58,4 @@ class DiagnosticConfig(BaseModel):
     thresholds: DiagnosticThresholds = Field(default_factory=DiagnosticThresholds)
     budget_allocation: DiagnosticBudgetAllocation = Field(default_factory=default_budget_allocation)
     run_id: str = Field(default_factory=uid)
-    scenario_version: Literal["v1", "v2"] = "v2"
+    scenario_version: Literal["v1", "v2", "v3"] = "v3"

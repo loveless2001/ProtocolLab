@@ -247,6 +247,9 @@ class ModelPortConfig(BaseModel):
     chat_template: Literal["raw", "chatml", "qwen_chat"] | None = None
     formatting_overhead_bytes: int = Field(default=0, ge=0)
     supported_decision_modes: list[str] | None = None
+    supports_claim_evidence: bool = True
+    supports_candidate_scoring_v1: bool = True
+    supports_constrained_candidates_v1: bool = True
 
     @model_validator(mode="after")
     def pinned(self):
@@ -467,35 +470,67 @@ class FrozenModelPort:
         self.store.set("model_port", self.phase, usage, "llm.call_reserved")
         started, called_at = time.monotonic(), datetime.now(timezone.utc).isoformat()
         request_hash = self.store.put_blob(request)
-        claim_refs = claims or []
+        claim_refs = []
+        for c in (claims or []):
+            ref = {"seq": c["seq"], "payload_hash": c.get("payload_hash") or digest(c.get("payload", ""))}
+            claim_refs.append(ref)
         self.last_request_seq = self.store.append("model_port", "llm.requested", {
             "request_hash": request_hash, "called_at": called_at, "claims": claim_refs})["seq"]
-        self.store.append("model_port", "llm.input_delivered", {
-            "request_seq": self.last_request_seq,
-            "request_hash": request_hash,
-            "input_evidence_hash": self.store.put_blob({"prompt": prompt, "candidates": candidates}),
-            "boundary": "candidate_score_input",
-            "claims": claim_refs,
-        })
+
+        def delivered(evidence, boundary):
+            evidence_prompt = evidence.get("prompt", "")
+            evidence_cands = evidence.get("candidates", [])
+            evidence_text = evidence_prompt + "".join(evidence_cands)
+            matching_claims = []
+            for c in (claims or []):
+                ref = {"seq": c["seq"], "payload_hash": c.get("payload_hash") or digest(c.get("payload", ""))}
+                if "payload" in c:
+                    rep = canonical(c).decode()
+                    if rep in evidence_text:
+                        matching_claims.append(ref)
+                elif ref in claim_refs:
+                    matching_claims.append(ref)
+            self.store.append("model_port", "llm.input_delivered", {
+                "request_seq": self.last_request_seq,
+                "request_hash": request_hash,
+                "input_evidence_hash": self.store.put_blob(evidence),
+                "boundary": boundary,
+                "claims": matching_claims,
+            })
+
+        def local_output(output):
+            lines = (output.decode() if isinstance(output, bytes) else output or "").splitlines()
+            if lines:
+                try:
+                    first = json.loads(lines[0])
+                    if "input_evidence" in first:
+                        delivered(first["input_evidence"], "local_score_candidates_input")
+                except Exception:
+                    pass
+            return json.loads(lines[-1]) if len(lines) > 1 else {}
 
         try:
             if self.config.backend == "local_frozen_checkpoint":
-                process = subprocess.run(
-                    [sys.executable, "-m", "protocollab.actor.local_worker"],
-                    input=json.dumps({**request, "checkpoint": self.config.checkpoint}),
-                    text=True, capture_output=True, timeout=self.config.deadline_seconds,
-                    env={**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"},
-                )
+                try:
+                    process = subprocess.run(
+                        [sys.executable, "-m", "protocollab.actor.local_worker"],
+                        input=json.dumps({**request, "checkpoint": self.config.checkpoint}),
+                        text=True, capture_output=True, timeout=self.config.deadline_seconds,
+                        env={**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"},
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    local_output(exc.stdout)
+                    raise
+                result = local_output(process.stdout)
                 if process.returncode:
                     raise RuntimeError("LOCAL_MODEL_FAILED: " + process.stderr[-2000:])
-                lines = (process.stdout or "").splitlines()
-                result = json.loads(lines[-1]) if lines else {}
             elif self.config.backend == "api":
                 headers = {"Content-Type": "application/json"}
                 if self.config.credential_env:
                     headers["Authorization"] = "Bearer " + os.environ[self.config.credential_env]
                 req = urllib.request.Request(self.config.endpoint, data=canonical(request), headers=headers)
                 with urllib.request.urlopen(req, timeout=self.config.deadline_seconds) as response:
+                    delivered({"prompt": prompt, "candidates": candidates}, "api_response_started")
                     result = json.loads(response.read(2 * 1024 * 1024))
             else:
                 raise ValueError(f"UNSUPPORTED_BACKEND: {self.config.backend}")

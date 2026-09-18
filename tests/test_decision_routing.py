@@ -12,7 +12,7 @@ from protocollab.actor import FrozenModelPort, ModelPortConfig, build_packet
 from protocollab.actor.diagnostic import build_state_decision_scenarios
 from protocollab.actor.diagnostic_config import DiagnosticConfig
 from protocollab.actor.diagnostic_harness import ActorDiagnosticHarness
-from protocollab.actor.modes import UnsupportedConfiguration
+from protocollab.actor.modes import DecisionAdapter, UnsupportedConfiguration
 from protocollab.contracts import canonical
 
 
@@ -97,7 +97,7 @@ def test_stage_2_routes_through_adapter(runtime, monkeypatch):
 
 
 def test_empty_candidate_registry_rejected_in_constrained_mode(runtime):
-    """Empty candidate registry raises UnsupportedConfiguration."""
+    """Empty candidate registry raises UnsupportedConfiguration in adapter and records UNSUPPORTED in harness."""
     config = ModelPortConfig(
         backend="api",
         model_id="test-model",
@@ -108,9 +108,16 @@ def test_empty_candidate_registry_rejected_in_constrained_mode(runtime):
         decision_mode="constrained_json",
         candidate_registry=[],  # empty
     )
-    harness = ActorDiagnosticHarness(config=diag_config)
     port = FrozenModelPort(config, runtime.store, max_calls=10, phase="prefix")
     packet = build_packet(runtime, "C0")
 
+    # Direct adapter call raises UnsupportedConfiguration upfront
+    adapter = DecisionAdapter(diag_config)
     with pytest.raises(UnsupportedConfiguration, match="requires a non-empty candidate_registry"):
-        harness.run_stage_1_minimal_proposal(port, packet, n_samples=1, config=diag_config)
+        adapter.decide(port, packet, seed=7)
+
+    # Harness records UNSUPPORTED status without crashing (§9)
+    harness = ActorDiagnosticHarness(config=diag_config)
+    s1 = harness.run_stage_1_minimal_proposal(port, packet, n_samples=1, config=diag_config)
+    assert s1.status == "UNSUPPORTED"
+    assert "UNSUPPORTED_CONFIGURATION" in s1.stop_rule_triggered

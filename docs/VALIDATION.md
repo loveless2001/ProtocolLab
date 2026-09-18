@@ -303,6 +303,22 @@ report serialization, and buffered request-ID matching fix these failures.
 Their regression checks are included in the retained suite. Model rollback now
 replays actual observations rather than clearing their inferred history.
 
+## Pre-Benchmark Diagnostic Integrity Fixes (Review basis: `22607090`)
+
+Prior to decision-mode benchmarking across `free_json`, `constrained_json`, and `candidate_score` on conditions `C0` and `C2`, diagnostic accounting and decision execution underwent comprehensive verification and integrity repairs:
+
+1. **Delivery Evidence Separation (§1)**: Disentangled input preparation, request dispatch, input delivery, and inference completion across API and local worker ports. `llm.input_delivered` is emitted strictly after backend transport boundary evidence is received (`api_response_started` or local worker `input_evidence` header), never prematurely before transport. In candidate scoring, claims are certified delivered only if their exact canonical representation appears in the worker's delivered input evidence.
+2. **Immediate Ledger Usage Settlement (§2)**: Token consumption is settled on the `DiagnosticLedger` immediately upon inference completion, before schema validation or proposal parsing. Malformed JSON settles consumed tokens on the ledger and returns a fallback proposal (`WAIT`) without falsely labeling inference as failed.
+3. **Explicit Capability Contract (§3)**: Replaced silent exception fallbacks with explicit capability flags on `ModelPortConfig`: `supports_claim_evidence`, `supports_candidate_scoring_v1`, `supports_constrained_candidates_v1`. `DecisionAdapter` preflights backend capabilities upfront and raises `UnsupportedConfiguration` without suppressing `TypeError`.
+4. **Candidate Registry Enforcement (§4)**: In `free_json` and `constrained_json`, unlisted proposal kinds (`PLAN`) and unauthorized operations are rejected with `NOT_IN_CANDIDATE_REGISTRY`. In `candidate_score`, returned candidate sets must match the configured registry exactly in 0..N-1 order, scores must be finite, model identities and fingerprints must match, and token counts must be non-negative integers.
+5. **Standardized Actor Interaction Lifecycle (§5)**: Stage 3 closed-loop execution emits the full standardized event lifecycle: `actor.raw_proposal`, `actor.proposal_returned` (or `actor.proposal_rejected`), `actor.proposed`, and `actor.interaction_completed`, all carrying consistent `request_seq` and `decision_basis_ref`.
+6. **Evaluator-Owned Progress Accounting (§6)**: Evaluates distinct counters for proposed, denied/stale, dispatched, acknowledged, and effective actions. Redundant NOOP mutations (such as `CANCEL` with empty pending queue) query the SQLite `effects` table and do not increment progress counters. Terminal status is protected so execution crashes maintain `FAIL` status regardless of prior progress rate.
+7. **Input-Driven Scenario Discrimination (§7)**: Stage 2 v3 scenarios are visibility-driven without artificial completion hints. Paired field sensitivity testing confirms that single-field state flips (e.g. `HOLD` vs `RUNNING`, or permitted vs revoked operations) reliably alter decision behavior.
+8. **Candidate-Scoring Compute Metrics (§8)**: Added standardized compute breakdowns (`logical_decisions`, `candidate_evaluations`, `prompt_tokens_logically_supplied`, `total_tokens_processed`, `forward_passes`, `prefill_recomputations`, `peak_memory_bytes`) propagated into StageResults and overall diagnostic reports.
+9. **Run Status Classification (§9)**: Distinguishes `PASS`, `FAIL`, `SKIPPED`, and `UNSUPPORTED`. Unsupported modes record `UNSUPPORTED` in stage results without crashing or false failure.
+10. **Decision Modes Experiment Manifest**: Configured locked 2x3 benchmark matrix in `experiments/decision-modes/manifest.yaml` across conditions `C0`, `C2` and decision modes `free_json`, `constrained_json`, and `candidate_score`, with execution disabled by default.
+11. **Automated Verification**: Comprehensive regression suite in `tests/test_prebenchmark_diagnostic_integrity.py` with 12 tests verifying all integrity invariants (100% pass rate).
+
 ## Scope and limits
 
 - The actual optional CPU inference worker is tested with a locally constructed

@@ -1,0 +1,28 @@
+spec_version: "0.1"
+manifest_version: decision-modes-benchmark-v1
+purpose: benchmarking
+description: "Evaluation of decision modes (free_json, constrained_json, candidate_score) across conditions C0 and C2."
+track: F
+conditions: [C0, C2]
+decision_modes: [free_json, constrained_json, candidate_score]
+governance_conditions: [G3]
+scenario_version: v3
+execution_disabled: true
+model_port: null  # Deliberately non-executable by default
+candidate_registry:
+  - '{"kind":"ACT","operation":"SUBMIT_A"}'
+  - '{"kind":"ACT","operation":"SUBMIT_B"}'
+  - '{"kind":"ACT","operation":"SIGNAL_X"}'
+  - '{"kind":"ACT","operation":"SIGNAL_Y"}'
+  - '{"kind":"ACT","operation":"CANCEL"}'
+  - '{"kind":"ACT","operation":"STATUS"}'
+  - '{"kind":"ACT","operation":"INSPECT"}'
+  - '{"kind":"WAIT"}'
+  - '{"kind":"FINISH"}'
+decoding_seeds: [7]
+max_live_turns: 8
+clean_suffixes_per_topology: 1
+paired_interventions: [pause]
+intervention_points: [before_plan]
+cpu_seconds_cap: 300
+wall_seconds_cap: 600
