@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import json
 import os
+import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -23,8 +24,52 @@ from protocollab.verified.protocol import (
     TransitionResult,
 )
 
-BUN_BIN = Path(os.environ.get("BUN_PATH", "/home/lenovo/.bun/bin/bun"))
-BEND_APP = Path(os.environ.get("BEND_APP", "/home/lenovo/.bend/app/2.0.5/AdMsHi/bend2/main.ts"))
+
+def find_bun() -> Path | None:
+    if "BUN_PATH" in os.environ:
+        p = Path(os.environ["BUN_PATH"])
+        if p.exists():
+            return p
+    which = shutil.which("bun")
+    if which:
+        return Path(which)
+    home_bun = Path.home() / ".bun" / "bin" / "bun"
+    if home_bun.exists():
+        return home_bun
+    return None
+
+
+def find_bend() -> Path | None:
+    if "BEND_PATH" in os.environ:
+        p = Path(os.environ["BEND_PATH"])
+        if p.exists():
+            return p
+    which = shutil.which("bend")
+    if which:
+        return Path(which)
+    home_bend = Path.home() / ".bend" / "bin" / "bend"
+    if home_bend.exists():
+        return home_bend
+    return None
+
+
+def find_bend_app() -> Path | None:
+    if "BEND_APP" in os.environ:
+        p = Path(os.environ["BEND_APP"])
+        if p.exists():
+            return p
+    base = Path.home() / ".bend"
+    matches = sorted(base.glob("app/2.0.5/*/bend2/main.ts"))
+    if matches:
+        return matches[0]
+    current = base / "current" / "bend2" / "main.ts"
+    if current.exists():
+        return current
+    return None
+
+
+BUN_BIN = find_bun()
+BEND_APP = find_bend_app()
 RUNNER_SCRIPT = (
     Path(__file__).resolve().parent.parent.parent / "scripts" / "verified_kernel" / "runner.mjs"
 )
@@ -51,8 +96,18 @@ class VerifiedKernelBridge:
 
     def _ensure_proc(self) -> subprocess.Popen[str]:
         if self._proc is None or self._proc.poll() is not None:
-            if not BUN_BIN.exists():
-                raise RuntimeError(f"Bun binary not found at {BUN_BIN}")
+            bun_path = find_bun()
+            if bun_path is None or not bun_path.exists():
+                raise RuntimeError(
+                    f"Bun binary not found at {bun_path or 'default paths'}. "
+                    "Install Bun or set BUN_PATH."
+                )
+            bend_app_path = find_bend_app()
+            if bend_app_path is None or not bend_app_path.exists():
+                raise RuntimeError(
+                    f"Bend preloader not found at {bend_app_path or 'default paths'}. "
+                    "Set BEND_APP or ensure Bend 2.0.5 application files exist."
+                )
             if not self.runner_path.exists():
                 raise RuntimeError(f"Runner script not found at {self.runner_path}")
 
@@ -61,7 +116,7 @@ class VerifiedKernelBridge:
             env["BEND_NO_TELEMETRY"] = "1"
 
             self._proc = subprocess.Popen(
-                [str(BUN_BIN), "--preload", str(BEND_APP), str(self.runner_path)],
+                [str(bun_path), "--preload", str(bend_app_path), str(self.runner_path)],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
+from protocollab.verified.bridge import find_bend
 from scripts.verified_kernel.mutate import MUTATIONS, check_mutation_breaks_proof
+
+bend_bin = find_bend()
+pytestmark = pytest.mark.skipif(
+    bend_bin is None or not bend_bin.exists(),
+    reason="Bend compiler not installed on this host",
+)
 
 KERNEL_DIR = Path(__file__).resolve().parent.parent.parent / "verified" / "lifecycle"
 

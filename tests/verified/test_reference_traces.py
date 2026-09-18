@@ -4,12 +4,23 @@ from typing import Any
 
 import pytest
 
-from protocollab.verified.bridge import VerifiedKernelBridge
+from protocollab.verified.bridge import (
+    VerifiedKernelBridge,
+    find_bend_app,
+    find_bun,
+)
 from protocollab.verified.protocol import (
     ChargeKind,
     StageLimit,
     TransportState,
     VerdictKind,
+)
+
+bun_bin = find_bun()
+bend_app = find_bend_app()
+pytestmark = pytest.mark.skipif(
+    bun_bin is None or not bun_bin.exists() or bend_app is None or not bend_app.exists(),
+    reason="Bend runtime / Bun toolchain not installed on this host",
 )
 
 

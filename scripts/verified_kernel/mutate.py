@@ -184,11 +184,17 @@ def check_mutation_breaks_proof(mutation_name: str, kernel_dir: Path) -> tuple[b
         # Run bend PROOF.bend
         import os
 
+        from protocollab.verified.bridge import find_bend
+
+        bend_bin = find_bend()
+        if bend_bin is None or not bend_bin.exists():
+            return False, f"Bend binary not found at {bend_bin or 'default paths'}"
+
         env = dict(os.environ)
         env["HOME"] = str(Path.home())
         env["BEND_NO_TELEMETRY"] = "1"
         res = subprocess.run(
-            ["/home/lenovo/.bend/bin/bend", str(tmp_path / "PROOF.bend")],
+            [str(bend_bin), str(tmp_path / "PROOF.bend")],
             capture_output=True,
             text=True,
             env=env,
