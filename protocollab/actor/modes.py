@@ -15,7 +15,7 @@ from protocollab.actor import (
 )
 from protocollab.actor.diagnostic_config import DiagnosticConfig
 from protocollab.actor.pipeline import compose_and_admit_input
-from protocollab.contracts import canonical
+from protocollab.contracts import canonical, digest
 
 
 class UnsupportedConfiguration(ValueError):
@@ -145,6 +145,7 @@ class DecisionAdapter:
             ledger.record_admission_attempt(stage)
 
         reservation = None
+        req_id = None
         try:
             # 3. Unified input composition and admission
             unformatted_prompt, formatted_prompt, evidence = compose_and_admit_input(
@@ -156,13 +157,20 @@ class DecisionAdapter:
             )
 
             # 4. Token reservation & dispatch
+            req_id = f"req_{digest(formatted_prompt)[:16]}"
+            max_input = self.config.model_port_config.max_input_tokens
+            max_output = self.config.model_port_config.max_output_tokens
             if ledger is not None:
-                reservation = (
-                    self.config.model_port_config.max_input_tokens
-                    + self.config.model_port_config.max_output_tokens
+                reservation = max_input + max_output
+                ledger.reserve(
+                    stage,
+                    reservation,
+                    req_id=req_id,
+                    basis_ref=basis_ref,
+                    max_input=max_input,
+                    max_output=max_output,
                 )
-                ledger.reserve(stage, reservation)
-                ledger.record_dispatched(stage)
+                ledger.record_dispatched(stage, req_id=req_id)
 
             # Snapshot cumulative tokens before call for delta computation (§2)
             prev_input = port.input_tokens
@@ -304,7 +312,13 @@ class DecisionAdapter:
         except Exception as exc:
             # Inference stage failed (admission, budget, transport, or candidate validation)
             if ledger is not None and reservation is not None:
-                ledger.record_failed(stage, reservation)
+                ev_hash = digest(f"{req_id or 'unknown'}:FAILED:{type(exc).__name__}")
+                ledger.record_failed(
+                    stage,
+                    reservation,
+                    req_id=req_id,
+                    evidence_hash=ev_hash,
+                )
 
             from protocollab.learning import BudgetExhausted
             error_meta: dict[str, Any] = {}
@@ -337,7 +351,17 @@ class DecisionAdapter:
 
         # 6. Settle inference usage immediately on ledger (§2)
         if ledger is not None:
-            ledger.record_completed(stage, inf_res.input_tokens, inf_res.output_tokens, reservation)
+            receipt_hash = digest(
+                f"{req_id}:{inf_res.input_tokens}:{inf_res.output_tokens}:{inf_res.completed}"
+            )
+            ledger.record_completed(
+                stage,
+                inf_res.input_tokens,
+                inf_res.output_tokens,
+                reservation,
+                req_id=req_id,
+                receipt_hash=receipt_hash,
+            )
 
         # 7. Phase 2: Proposal Parsing and Registry Membership Validation (§2, §4)
         if mode in ("free_json", "constrained_json"):

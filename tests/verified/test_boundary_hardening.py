@@ -371,3 +371,171 @@ def test_lifecycle_owner_quarantine_evidence_retention():
     # Verify quarantine evidence is stored
     found_receipt = any("QUARANTINE_RECEIPT_999" in str(rec) for rec in store.records)
     assert found_receipt, "Quarantine receipt evidence must be persisted in store records!"
+
+
+def test_lifecycle_owner_quarantine_crash_gap_closed():
+    """Verify that failing to write quarantine evidence does NOT persist a latched fault,
+
+    allowing subsequent retry to successfully persist evidence and latched fault together.
+    """
+    class CrashBeforeEvidenceStore(DummyStore):
+        def __init__(self):
+            super().__init__()
+            self.fail_evidence = True
+
+        def set(self, table: str, key: str, payload: Any, kind: str):
+            if table == "verified_quarantine_records" and self.fail_evidence:
+                raise RuntimeError("SIMULATED_CRASH_BEFORE_EVIDENCE_COMMIT")
+            super().set(table, key, payload, kind)
+
+    class ConflictBridge(FaultyBridge):
+        def apply(self, state, event):
+            from types import SimpleNamespace
+            if state.fault:
+                return SimpleNamespace(
+                    state=state,
+                    verdict=SimpleNamespace(kind=VerdictKind.REJECTED, intent=None, reason="STATE_FAULT_LATCHED"),
+                )
+            s = state.model_copy(deep=True)
+            s.fault = "CONFLICTING_USAGE_AFTER_RELEASE"
+            return SimpleNamespace(
+                state=s,
+                verdict=SimpleNamespace(kind=VerdictKind.CONFLICT_FAULT, intent=None, reason=s.fault),
+            )
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=5, max_tokens=500)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=1000,
+    )
+    store = CrashBeforeEvidenceStore()
+    bridge = ConflictBridge()
+    owner = VerifiedLifecycleOwner(
+        store=store,
+        run_id="crash_gap_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+
+    # First attempt: simulated crash when writing quarantine records
+    with pytest.raises(RuntimeError) as exc1:
+        owner.record_completed("stage1", 60, 10, 160, req_id="r1", receipt_hash="CRASH_RECEIPT")
+    assert "SIMULATED_CRASH_BEFORE_EVIDENCE_COMMIT" in str(exc1.value)
+
+    # Ledger state in store must NOT have been latched with fault during failed evidence write!
+    stored_ledger = store.get("verified_lifecycle_ledger", "crash_gap_run")
+    assert stored_ledger.get("fault") is None, "Fault must NOT be latched if quarantine evidence write fails!"
+
+    # Second attempt (after store recovery): retry successfully persists evidence and latches fault
+    store.fail_evidence = False
+    with pytest.raises(RuntimeError) as exc2:
+        owner.record_completed("stage1", 60, 10, 160, req_id="r1", receipt_hash="CRASH_RECEIPT")
+    assert "CONFLICTING_USAGE_AFTER_RELEASE" in str(exc2.value)
+
+    # Verify evidence is now cleanly stored
+    quarantine_entry = store.get("verified_quarantine_records", "crash_gap_run:r1")
+    assert quarantine_entry is not None
+    assert quarantine_entry["receipt_hash"] == "CRASH_RECEIPT"
+
+
+def test_find_bend_app_discovers_version_trees(tmp_path, monkeypatch):
+    """Verify that find_bend_app discovers versioned app trees (e.g. 2.0.7, 2.0.5) in reverse order."""
+    from protocollab.verified.bridge import find_bend_app
+
+    monkeypatch.delenv("BEND_APP", raising=False)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+    app_207 = tmp_path / ".bend" / "app" / "2.0.7" / "pkgA" / "bend2" / "main.ts"
+    app_207.parent.mkdir(parents=True, exist_ok=True)
+    app_207.write_text("// 2.0.7 fixture")
+
+    app_205 = tmp_path / ".bend" / "app" / "2.0.5" / "pkgB" / "bend2" / "main.ts"
+    app_205.parent.mkdir(parents=True, exist_ok=True)
+    app_205.write_text("// 2.0.5 fixture")
+
+    found = find_bend_app()
+    assert found == app_207, f"Expected newest 2.0.7 version, got {found}"
+
+
+def test_decision_adapter_verified_lifecycle_integration():
+    """Verify that DecisionAdapter passes authentic cryptographic req_id, basis_ref,
+
+    caps, and receipts to VerifiedLifecycleOwner rather than fabricated defaults.
+    """
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-model",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="free_json",
+        renderer="demarcated",
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class DummyPort:
+        def __init__(self):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.input_tokens = 0
+            self.output_tokens = 0
+
+        def generate(self, packet, seed, prompt_override=None):
+            self.input_tokens += 60
+            self.output_tokens += 30
+            return '{"kind": "WAIT"}'
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=5, max_tokens=2000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=4000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="adapter_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+
+    packet = {
+        "schema_version": "0.1",
+        "public_alphabet": ["TICK"],
+        "task": {},
+        "decision_basis_ref": "basis-claim-777",
+    }
+    outcome = adapter.decide(DummyPort(), packet, seed=42, ledger=owner, stage="stage1")
+    assert outcome.proposal.kind == "WAIT"
+
+    # Inspect events emitted to bridge
+    reserve_ev = next(e for e in bridge.events if e["kind"] == "Reserve")
+    disp_ev = next(e for e in bridge.events if e["kind"] == "DispatchIntent")
+    settle_ev = next(e for e in bridge.events if e["kind"] == "SettleUsage")
+
+    # Verify authentic properties:
+    assert reserve_ev["req_id"].startswith("req_")
+    assert reserve_ev["basis_ref"] == "basis-claim-777"
+    assert reserve_ev["max_input"] == 1000
+    assert reserve_ev["max_output"] == 500
+
+    assert disp_ev["req_id"] == reserve_ev["req_id"]
+
+    assert settle_ev["req_id"] == reserve_ev["req_id"]
+    assert settle_ev["input_tokens"] == 60
+    assert settle_ev["output_tokens"] == 30
+    assert settle_ev["receipt_hash"] != "receipt_default"
+    assert len(settle_ev["receipt_hash"]) == 64  # SHA-256 hex digest
+
+

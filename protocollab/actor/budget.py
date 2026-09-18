@@ -91,7 +91,17 @@ class DiagnosticLedger:
         if agg_usage.calls_attempted > self.state.allocation.aggregate_max_calls:
             raise BudgetExhausted("aggregate_diagnostic_max_calls_exceeded")
 
-    def reserve(self, stage: str, reservation_tokens: int):
+    def reserve(
+        self,
+        stage: str,
+        reservation_tokens: int,
+        req_id: str | None = None,
+        basis_ref: str = "",
+        max_input: int | None = None,
+        max_output: int | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ):
         stage_limits = self.state.allocation.stages.get(stage)
         stage_usage = self.state.stages.get(stage)
         agg_usage = self.state.aggregate
@@ -109,7 +119,7 @@ class DiagnosticLedger:
         agg_usage.reserved_tokens += reservation_tokens
         self._sync("diagnostic.call_reserved")
 
-    def record_dispatched(self, stage: str):
+    def record_dispatched(self, stage: str, req_id: str | None = None, *args: Any, **kwargs: Any):
         stage_usage = self.state.stages.get(stage)
         agg_usage = self.state.aggregate
         if stage_usage is None:
@@ -118,7 +128,17 @@ class DiagnosticLedger:
         agg_usage.dispatched_inference += 1
         self._sync("diagnostic.call_dispatched")
 
-    def record_completed(self, stage: str, input_tokens: int, output_tokens: int, reservation_tokens: int):
+    def record_completed(
+        self,
+        stage: str,
+        input_tokens: int,
+        output_tokens: int,
+        reservation_tokens: int,
+        req_id: str | None = None,
+        receipt_hash: str | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ):
         stage_limits = self.state.allocation.stages[stage]
         stage_usage = self.state.stages[stage]
         agg_usage = self.state.aggregate
@@ -139,7 +159,15 @@ class DiagnosticLedger:
         if agg_usage.input_tokens + agg_usage.output_tokens > self.state.allocation.aggregate_max_tokens:
             raise BudgetExhausted("aggregate_diagnostic_tokens_exceeded")
 
-    def record_failed(self, stage: str, reservation_tokens: int):
+    def record_failed(
+        self,
+        stage: str,
+        reservation_tokens: int,
+        req_id: str | None = None,
+        evidence_hash: str | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ):
         stage_usage = self.state.stages[stage]
         agg_usage = self.state.aggregate
         stage_usage.failures += 1

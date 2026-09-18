@@ -62,10 +62,38 @@ export function stageLimitFromBend(sl) {
   };
 }
 
+// Detect if Bend runtime prefixes imported ADT constructors with module name
+let transportPrefix = "Types.";
+try {
+  const dummyState = {
+    $: "LState",
+    run_id: "",
+    config_hash: "",
+    agg_max_calls: 1n,
+    agg_max_tokens: 1n,
+    stage_limits: { $: "Con", head: { $: "SLimit", stage: "_s", max_calls: 1n, max_tokens: 1n }, tail: { $: "Nil" } },
+    requests: { $: "Nil" },
+    fault: { $: "None" }
+  };
+  const dummyEv = {
+    $: "EvReserve",
+    req_id: "_probe",
+    stage: "_s",
+    basis_ref: "",
+    config_hash: "",
+    max_input: 1n,
+    max_output: 0n
+  };
+  const r = K.apply(dummyState, dummyEv);
+  if (r && r.state && r.state.requests && r.state.requests.head && r.state.requests.head.transport) {
+    transportPrefix = r.state.requests.head.transport.$.startsWith("Types.") ? "Types." : "";
+  }
+} catch (e) {}
+
 export function transportToBend(tr) {
   let tag = typeof tr === "string" ? tr : (tr.$ || "Prepared");
-  if (!tag.startsWith("Types.")) tag = "Types." + tag;
-  return { $: tag };
+  if (tag.startsWith("Types.")) tag = tag.slice(6);
+  return { $: transportPrefix + tag };
 }
 
 export function transportFromBend(tr) {

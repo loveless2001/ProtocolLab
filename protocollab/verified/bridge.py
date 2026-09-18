@@ -59,12 +59,12 @@ def find_bend_app() -> Path | None:
         if p.exists():
             return p
     base = Path.home() / ".bend"
-    matches = sorted(base.glob("app/2.0.5/*/bend2/main.ts"))
-    if matches:
-        return matches[0]
     current = base / "current" / "bend2" / "main.ts"
     if current.exists():
         return current
+    matches = sorted(base.glob("app/*/*/bend2/main.ts"), reverse=True)
+    if matches:
+        return matches[0]
     return None
 
 

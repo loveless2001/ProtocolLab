@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from contextlib import contextmanager
 from typing import Any
 
 from protocollab.actor.budget import (
@@ -197,18 +198,45 @@ class VerifiedLifecycleOwner:
             event_kind,
         )
 
-    def _apply_bridge(self, ev: dict[str, Any], event_kind: str) -> Any:
-        lock = getattr(self.store, "lock", None)
-        if lock:
-            with lock:
-                self._refresh_state()
-                res = self.bridge.apply(self.bend_state, ev)
-                self.bend_state = res.state
-                self._sync(event_kind)
-                return res
+    @contextmanager
+    def _store_transaction(self):
+        if hasattr(self.store, "transaction"):
+            with self.store.transaction():
+                yield
+        elif hasattr(self.store, "lock"):
+            with self.store.lock:
+                yield
         else:
+            yield
+
+    def _apply_bridge(self, ev: dict[str, Any], event_kind: str) -> Any:
+        with self._store_transaction():
             self._refresh_state()
             res = self.bridge.apply(self.bend_state, ev)
+
+            # If conflict fault occurred, record quarantine evidence BEFORE persisting faulted ledger state.
+            # This ensures that if recording quarantine evidence fails, the faulted ledger is not latched,
+            # allowing retry/replay without losing evidence.
+            if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
+                target_id = ev.get("req_id") or self._stage_last_completed.get(
+                    ev.get("stage", ""), "unknown"
+                )
+                quarantine_payload = {
+                    "run_id": self.run_id,
+                    "req_id": target_id,
+                    "stage": ev.get("stage", ""),
+                    "receipt_hash": ev.get("receipt_hash"),
+                    "input_tokens": ev.get("input_tokens"),
+                    "output_tokens": ev.get("output_tokens"),
+                    "fault": res.verdict.reason or "CONFLICTING_USAGE_AFTER_RELEASE",
+                }
+                self.store.set(
+                    "verified_quarantine_records",
+                    f"{self.run_id}:{target_id}",
+                    quarantine_payload,
+                    "verified.quarantine_conflict_recorded",
+                )
+
             self.bend_state = res.state
             self._sync(event_kind)
             return res
@@ -362,20 +390,6 @@ class VerifiedLifecycleOwner:
         else:
             res = self._apply_bridge(ev, "verified.call_completed")
             if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
-                self.store.set(
-                    "verified_quarantine_records",
-                    f"{self.run_id}:{target_id}",
-                    {
-                        "run_id": self.run_id,
-                        "req_id": target_id,
-                        "stage": stage,
-                        "receipt_hash": receipt_hash,
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "fault": res.verdict.reason or "CONFLICTING_USAGE_AFTER_RELEASE",
-                    },
-                    "verified.quarantine_conflict_recorded",
-                )
                 raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
             if res.verdict.kind == VerdictKind.REJECTED:
                 raise BudgetExhausted(res.verdict.reason or "REJECTED")
