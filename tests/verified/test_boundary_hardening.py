@@ -98,6 +98,22 @@ class FaultyBridge:
                 verdict=SimpleNamespace(kind=VerdictKind.ACCEPTED, intent=None, reason=None),
             )
 
+        if event.get("kind") == "SettleUsage":
+            s = state.model_copy(deep=True)
+            existing = next((r for r in s.requests if r.req_id == event["req_id"]), None)
+            if existing:
+                existing.charge = Charge(
+                    kind=ChargeKind.SETTLED,
+                    input_tokens=event.get("input_tokens", 0),
+                    output_tokens=event.get("output_tokens", 0),
+                    receipt_hash=event.get("receipt_hash", "rcpt"),
+                )
+                existing.transport = TransportState.RESPONSE_RECEIVED
+            return SimpleNamespace(
+                state=s,
+                verdict=SimpleNamespace(kind=VerdictKind.ACCEPTED, intent=None, reason=None),
+            )
+
         return SimpleNamespace(
             state=state,
             verdict=SimpleNamespace(kind=VerdictKind.ACCEPTED, intent=None, reason=None),
@@ -1109,6 +1125,297 @@ def test_find_bend_app_discovery_flexibility_and_vendored_fallback():
         with patch.dict("os.environ", {"BEND_APP": str(custom_runner)}), patch.object(Path, "home", return_value=home):
             res = find_bend_app()
             assert res == custom_runner, f"Expected BEND_APP override, got {res}"
+
+
+def test_transport_timeout_or_drop_cyclic_exception_chain():
+    """Verify is_transport_timeout_or_drop terminates cleanly on cyclic exception chains."""
+    from protocollab.actor.modes import is_transport_timeout_or_drop
+
+    # Cycle without timeout
+    x = ValueError("outer")
+    y = RuntimeError("inner")
+    x.__cause__ = y
+    y.__context__ = x
+    assert is_transport_timeout_or_drop(x) is False
+
+    # Cycle containing timeout
+    t = TimeoutError("gateway timed out")
+    z = ValueError("wrapped")
+    z.__cause__ = t
+    t.__context__ = z
+    assert is_transport_timeout_or_drop(z) is True
+
+
+def test_decision_outcome_fallback_preserves_measured_tokens():
+    """Verify that fallback DecisionOutcome preserves measured per-request token usage."""
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-model",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="free_json",
+        renderer="demarcated",
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class FailingInferencePort:
+        def __init__(self):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.input_tokens = 0
+            self.output_tokens = 0
+
+        def generate(self, packet, seed, prompt_override=None):
+            self.input_tokens += 120
+            self.output_tokens += 35
+            raise ValueError("SIMULATED_BACKEND_TRANSPORT_ERROR")
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=5, max_tokens=2000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=4000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="run_fallback_tokens",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+    packet = {"schema_version": "0.1", "public_alphabet": ["TICK"], "task": {}}
+    outcome = adapter.decide(FailingInferencePort(), packet, seed=42, ledger=owner, stage="stage1")
+
+    assert outcome.is_fallback is True
+    assert outcome.validation_outcome == "INFERENCE_FAILED"
+    assert outcome.request_input_tokens == 120
+    assert outcome.request_output_tokens == 35
+    assert outcome.total_tokens_evaluated == 155
+
+
+def test_prepared_reservation_duplicate_does_not_advance_dispatch():
+    """Verify that deciding on an already-prepared reservation rejects as duplicate without advancing transport to DispatchedIntent."""
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+    from protocollab.verified.protocol import TransportState
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-model",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="free_json",
+        renderer="demarcated",
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class DummyPort:
+        def __init__(self):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.input_tokens = 0
+            self.output_tokens = 0
+            self.calls = 0
+
+        def generate(self, packet, seed, prompt_override=None):
+            self.calls += 1
+            return '{"kind": "WAIT"}'
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=5, max_tokens=2000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=4000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="run_prepared_dup",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+    # Reserve initial request in Prepared state
+    owner.reserve("stage1", 1500, req_id="req_prep_1", basis_ref="basis", max_input=1000, max_output=500)
+    assert owner.bend_state.requests[0].transport == TransportState.PREPARED
+
+    # Decide with the same request ID
+    port = DummyPort()
+    packet = {"schema_version": "0.1", "public_alphabet": ["TICK"], "task": {}}
+    outcome = adapter.decide(port, packet, seed=42, ledger=owner, stage="stage1", req_id="req_prep_1")
+
+    assert port.calls == 0
+    assert outcome.validation_outcome == "DUPLICATE_REQUEST"
+    # Verify request transport remained PREPARED and was NOT advanced to DISPATCHED_INTENT
+    assert owner.bend_state.requests[0].transport == TransportState.PREPARED
+
+
+def test_shadow_mode_duplicate_suppression_resilient_to_bridge_failure():
+    """Verify that in SHADOW mode, legacy duplicate suppression holds even if the shadow bridge fails."""
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-model",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="free_json",
+        renderer="demarcated",
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class CountingPort:
+        def __init__(self):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.input_tokens = 0
+            self.output_tokens = 0
+            self.calls = 0
+
+        def generate(self, packet, seed, prompt_override=None):
+            self.calls += 1
+            self.input_tokens += 10
+            self.output_tokens += 5
+            return '{"kind": "WAIT"}'
+
+    class FailingBridge(FaultyBridge):
+        def __init__(self):
+            super().__init__()
+            self.should_fail = False
+
+        def apply(self, state, ev):
+            if self.should_fail:
+                raise RuntimeError("SHADOW_BRIDGE_DOWN")
+            return super().apply(state, ev)
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=5, max_tokens=2000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=4000,
+    )
+    bridge = FailingBridge()
+    store = DummyStore()
+    owner = VerifiedLifecycleOwner(
+        store=store,
+        run_id="run_shadow_resilient",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.SHADOW,
+        bridge=bridge,
+    )
+    port = CountingPort()
+    packet = {"schema_version": "0.1", "public_alphabet": ["TICK"], "task": {}}
+
+    # First attempt succeeds
+    out1 = adapter.decide(port, packet, seed=1, ledger=owner, stage="stage1", req_id="req_shadow_dup")
+    assert port.calls == 1
+    assert out1.validation_outcome == "VALID"
+
+    # Simulate bridge failure on duplicate attempt
+    bridge.should_fail = True
+    out2 = adapter.decide(port, packet, seed=1, ledger=owner, stage="stage1", req_id="req_shadow_dup")
+    assert port.calls == 1
+    assert out2.validation_outcome == "DUPLICATE_REQUEST"
+
+
+def test_shadow_mode_reopened_owner_prevents_duplicate_reservation_leak():
+    """Verify that reopening a SHADOW owner on an existing run seeds seen_req_ids, preventing reservation leaks."""
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-model",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="free_json",
+        renderer="demarcated",
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class SingleCallPort:
+        def __init__(self):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.input_tokens = 0
+            self.output_tokens = 0
+            self.calls = 0
+
+        def generate(self, packet, seed, prompt_override=None):
+            self.calls += 1
+            self.input_tokens += 50
+            self.output_tokens += 10
+            return '{"kind": "WAIT"}'
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=5, max_tokens=2000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=4000,
+    )
+    store = DummyStore()
+    bridge = FaultyBridge()
+    owner1 = VerifiedLifecycleOwner(
+        store=store,
+        run_id="run_restart_leak_check",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.SHADOW,
+        bridge=bridge,
+    )
+    port = SingleCallPort()
+    packet = {"schema_version": "0.1", "public_alphabet": ["TICK"], "task": {}}
+
+    # Initial decide completes
+    out1 = adapter.decide(port, packet, seed=1, ledger=owner1, stage="stage1", req_id="req_restart_1")
+    assert port.calls == 1
+    assert out1.validation_outcome == "VALID"
+    assert owner1.state.aggregate.reserved_tokens == 0
+
+    # Reopen owner on the same run_id
+    owner2 = VerifiedLifecycleOwner(
+        store=store,
+        run_id="run_restart_leak_check",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.SHADOW,
+        bridge=bridge,
+    )
+    out2 = adapter.decide(port, packet, seed=1, ledger=owner2, stage="stage1", req_id="req_restart_1")
+    assert port.calls == 1
+    assert out2.validation_outcome == "DUPLICATE_REQUEST"
+    # Ensure legacy ledger reserved_tokens is NOT leaked
+    assert owner2.state.aggregate.reserved_tokens == 0
+    assert owner2.project_diagnostic_state().aggregate.reserved_tokens == 0
+
 
 
 

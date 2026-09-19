@@ -81,10 +81,16 @@ class DecisionOutcome:
     backend_meta: dict[str, Any] = field(default_factory=dict)
 
 
-def is_transport_timeout_or_drop(exc: Exception) -> bool:
+def is_transport_timeout_or_drop(exc: Exception, seen: set[int] | None = None) -> bool:
     """Classify exceptions indicating network timeout, connection drop, or subprocess timeout after dispatch."""
     import subprocess
     import urllib.error
+
+    if seen is None:
+        seen = set()
+    if id(exc) in seen:
+        return False
+    seen.add(id(exc))
 
     if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired, ConnectionError)):
         return True
@@ -98,9 +104,9 @@ def is_transport_timeout_or_drop(exc: Exception) -> bool:
     msg = str(exc).lower()
     if "timeout" in name or "connection" in name or "timeouterror" in msg or "timed out" in msg:
         return True
-    if getattr(exc, "__cause__", None) and is_transport_timeout_or_drop(exc.__cause__):
+    if getattr(exc, "__cause__", None) and is_transport_timeout_or_drop(exc.__cause__, seen):
         return True
-    if getattr(exc, "__context__", None) and is_transport_timeout_or_drop(exc.__context__):
+    if getattr(exc, "__context__", None) and is_transport_timeout_or_drop(exc.__context__, seen):
         return True
     return False
 
@@ -202,10 +208,14 @@ class DecisionAdapter:
                     max_input=max_input,
                     max_output=max_output,
                 )
-                v_disp = ledger.record_dispatched(stage, req_id=req_id)
                 res_kind = getattr(v_res, "value", v_res)
+                if res_kind in ("DuplicateNoop", "DUPLICATE_NOOP", "duplicate_noop"):
+                    raise ValueError(
+                        f"DUPLICATE_REQUEST_DISPATCH: req_id {req_id!r} has already been reserved or dispatched"
+                    )
+                v_disp = ledger.record_dispatched(stage, req_id=req_id)
                 disp_kind = getattr(v_disp, "value", v_disp)
-                if res_kind == "DuplicateNoop" or disp_kind == "DuplicateNoop":
+                if disp_kind in ("DuplicateNoop", "DUPLICATE_NOOP", "duplicate_noop"):
                     raise ValueError(
                         f"DUPLICATE_REQUEST_DISPATCH: req_id {req_id!r} has already been reserved or dispatched"
                     )
@@ -426,6 +436,8 @@ class DecisionAdapter:
                 validation_outcome=val_outcome,
                 is_fallback=True,
                 total_tokens_evaluated=delta_input + delta_output,
+                request_input_tokens=delta_input,
+                request_output_tokens=delta_output,
                 decision_basis_ref=basis_ref,
                 claim_refs=claim_refs,
                 backend_meta=error_meta,

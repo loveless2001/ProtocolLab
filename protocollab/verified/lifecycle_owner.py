@@ -102,6 +102,9 @@ class VerifiedLifecycleOwner:
         else:
             self.bend_state = decode_state(stored)
             self._reconstruct_routing()
+            if self.mode == LifecycleMode.SHADOW:
+                for req in self.bend_state.requests:
+                    self.legacy_ledger._seen_req_ids.add(req.req_id)
 
     @property
     def state(self) -> DiagnosticLedgerState:
@@ -188,6 +191,9 @@ class VerifiedLifecycleOwner:
             if latest != self.bend_state:
                 self.bend_state = latest
                 self._reconstruct_routing()
+                if self.mode == LifecycleMode.SHADOW:
+                    for req in self.bend_state.requests:
+                        self.legacy_ledger._seen_req_ids.add(req.req_id)
 
     def _sync(self, event_kind: str = "verified.lifecycle_updated"):
         encoded = encode_state(self.bend_state)
@@ -291,8 +297,9 @@ class VerifiedLifecycleOwner:
 
         # In shadow mode, run legacy ledger
         if self.mode == LifecycleMode.SHADOW:
+            legacy_res = None
             try:
-                self.legacy_ledger.reserve(stage, reservation_tokens, req_id=req_id)
+                legacy_res = self.legacy_ledger.reserve(stage, reservation_tokens, req_id=req_id)
             except Exception as legacy_err:
                 try:
                     self._apply_bridge(ev, "verified.call_reserved_shadow")
@@ -302,9 +309,13 @@ class VerifiedLifecycleOwner:
 
             try:
                 res = self._apply_bridge(ev, "verified.call_reserved_shadow")
+                if legacy_res in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
+                    return VerdictKind.DUPLICATE_NOOP
                 return res.verdict.kind
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel reserve failed: %s", shadow_err)
+                if legacy_res in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
+                    return VerdictKind.DUPLICATE_NOOP
                 return VerdictKind.ACCEPTED
         else:
             res = self._apply_bridge(ev, "verified.call_reserved")
@@ -330,12 +341,16 @@ class VerifiedLifecycleOwner:
         ev = {"kind": "DispatchIntent", "req_id": target_id}
 
         if self.mode == LifecycleMode.SHADOW:
-            self.legacy_ledger.record_dispatched(stage, req_id=target_id)
+            legacy_disp = self.legacy_ledger.record_dispatched(stage, req_id=target_id)
             try:
                 res = self._apply_bridge(ev, "verified.call_dispatched_shadow")
+                if legacy_disp in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
+                    return VerdictKind.DUPLICATE_NOOP
                 return res.verdict.kind
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_dispatched failed: %s", shadow_err)
+                if legacy_disp in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
+                    return VerdictKind.DUPLICATE_NOOP
                 return VerdictKind.ACCEPTED
         else:
             res = self._apply_bridge(ev, "verified.call_dispatched")
