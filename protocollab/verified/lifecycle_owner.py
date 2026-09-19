@@ -25,6 +25,14 @@ from protocollab.verified.protocol import (
     TransportState,
     VerdictKind,
 )
+from protocollab.verified.shadow_audit import (
+    SHADOW_COMPARISON_KIND,
+    SHADOW_COMPARISON_OWNER,
+    build_shadow_comparison,
+    diagnostic_state_hash,
+    normalize_verdict,
+    utc_now,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -313,20 +321,72 @@ class VerifiedLifecycleOwner:
             pending = self._load_shadow_pending()
             if not pending:
                 return latest
-            item = pending[0]
             try:
-                latest = self._apply_bridge(item["event"], item["event_kind"])
+                with self._store_transaction():
+                    pending = self._load_shadow_pending()
+                    if not pending:
+                        return latest
+                    item = pending[0]
+                    latest = self._apply_bridge(item["event"], item["event_kind"])
+                    comparison = build_shadow_comparison(
+                        item,
+                        latest.verdict,
+                        diagnostic_state_hash(self.project_diagnostic_state()),
+                    )
+                    if hasattr(self.store, "append"):
+                        self.store.append(
+                            SHADOW_COMPARISON_OWNER,
+                            SHADOW_COMPARISON_KIND,
+                            comparison,
+                        )
+                    else:
+                        self.store.set(
+                            SHADOW_COMPARISON_OWNER,
+                            comparison["comparison_id"],
+                            comparison,
+                            SHADOW_COMPARISON_KIND,
+                        )
+                    self._save_shadow_pending(pending[1:])
+                    if comparison["status"] != "MATCH":
+                        logger.warning(
+                            "Verified shadow lifecycle divergence: event=%s active=%s "
+                            "observer=%s state_match=%s comparison_id=%s",
+                            comparison["lifecycle_event_kind"],
+                            comparison["active_verdict"],
+                            comparison["observer_verdict"],
+                            comparison["state_match"],
+                            comparison["comparison_id"],
+                        )
             except Exception as shadow_err:
+                self._refresh_state()
                 logger.warning("Verified shadow observer unavailable: %s", shadow_err)
                 return latest
-            self._save_shadow_pending(pending[1:])
 
-    def _observe_shadow(self, ev: dict[str, Any], event_kind: str) -> Any | None:
+    def _observe_shadow(
+        self,
+        ev: dict[str, Any],
+        event_kind: str,
+        active_verdict: Any,
+    ) -> Any | None:
         """Durably enqueue an active event, then make a bounded catch-up attempt."""
-        pending = self._load_shadow_pending()
-        pending.append({"event": ev, "event_kind": event_kind})
-        self._save_shadow_pending(pending)
-        if self._defer_shadow_observation or getattr(self.store, "_depth", 0) > 0:
+        with self._store_transaction():
+            pending = self._load_shadow_pending()
+            pending.append(
+                {
+                    "schema_version": "1.0",
+                    "comparison_id": f"shadow_{uuid.uuid4().hex}",
+                    "run_id": self.run_id,
+                    "enqueued_at": utc_now(),
+                    "event": ev,
+                    "event_kind": event_kind,
+                    "active_verdict": normalize_verdict(active_verdict),
+                    "active_state_hash": diagnostic_state_hash(
+                        self.legacy_ledger.state
+                    ),
+                }
+            )
+            self._save_shadow_pending(pending)
+        if self._defer_shadow_observation:
             return None
         return self._drain_shadow_observations()
 
@@ -380,7 +440,6 @@ class VerifiedLifecycleOwner:
 
         # In shadow mode, run legacy ledger
         if self.mode == LifecycleMode.SHADOW:
-            legacy_res = None
             try:
                 legacy_res = self.legacy_ledger.reserve(
                     stage,
@@ -390,20 +449,24 @@ class VerifiedLifecycleOwner:
                     max_input=mi,
                     max_output=mo,
                 )
-            except Exception as legacy_err:
-                raise legacy_err
+            except (BudgetExhausted, ValueError):
+                try:
+                    self._observe_shadow(
+                        ev,
+                        "verified.call_reserved_shadow",
+                        VerdictKind.REJECTED,
+                    )
+                except Exception as shadow_err:
+                    logger.warning(
+                        "Verified shadow kernel rejected reserve observation failed: %s",
+                        shadow_err,
+                    )
+                raise
 
             try:
-                res = self._observe_shadow(ev, "verified.call_reserved_shadow")
-                observer_kind = getattr(
-                    getattr(res, "verdict", None), "kind", None
+                self._observe_shadow(
+                    ev, "verified.call_reserved_shadow", legacy_res
                 )
-                if observer_kind is not None and observer_kind != legacy_res:
-                    logger.warning(
-                        "Verified shadow kernel reserve divergence: legacy=%s, observer=%s",
-                        legacy_res,
-                        observer_kind,
-                    )
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel reserve failed: %s", shadow_err)
 
@@ -432,20 +495,29 @@ class VerifiedLifecycleOwner:
         ev = {"kind": "DispatchIntent", "req_id": target_id}
 
         if self.mode == LifecycleMode.SHADOW:
-            legacy_disp = self.legacy_ledger.record_dispatched(stage, req_id=target_id)
-            res = None
             try:
-                res = self._observe_shadow(ev, "verified.call_dispatched_shadow")
+                legacy_disp = self.legacy_ledger.record_dispatched(
+                    stage, req_id=target_id
+                )
+            except (BudgetExhausted, ValueError):
+                try:
+                    self._observe_shadow(
+                        ev,
+                        "verified.call_dispatched_shadow",
+                        VerdictKind.REJECTED,
+                    )
+                except Exception as shadow_err:
+                    logger.warning(
+                        "Verified shadow kernel rejected dispatch observation failed: %s",
+                        shadow_err,
+                    )
+                raise
+            try:
+                self._observe_shadow(
+                    ev, "verified.call_dispatched_shadow", legacy_disp
+                )
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_dispatched failed: %s", shadow_err)
-
-            observer_kind = getattr(res.verdict, "kind", None) if res is not None else None
-            if observer_kind is not None and observer_kind != legacy_disp:
-                logger.warning(
-                    "Verified shadow kernel record_dispatched divergence: legacy=%s, observer=%s",
-                    legacy_disp,
-                    observer_kind,
-                )
             return VerdictKind(legacy_disp)
         else:
             res = self._apply_bridge(ev, "verified.call_dispatched")
@@ -528,7 +600,9 @@ class VerifiedLifecycleOwner:
                     "verified.quarantine_conflict_recorded",
                 )
             try:
-                self._observe_shadow(ev, "verified.call_completed_shadow")
+                self._observe_shadow(
+                    ev, "verified.call_completed_shadow", legacy_result
+                )
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_completed failed: %s", shadow_err)
             return VerdictKind(legacy_result)
@@ -585,7 +659,7 @@ class VerifiedLifecycleOwner:
                 evidence_hash=evidence_hash,
             )
             try:
-                self._observe_shadow(ev, "verified.call_failed_shadow")
+                self._observe_shadow(ev, "verified.call_failed_shadow", legacy_result)
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_failed failed: %s", shadow_err)
             return VerdictKind(legacy_result)
@@ -626,19 +700,21 @@ class VerifiedLifecycleOwner:
 
         if self.mode == LifecycleMode.SHADOW:
             if hasattr(self.legacy_ledger, "record_timeout"):
-                self.legacy_ledger.record_timeout(
+                legacy_result = self.legacy_ledger.record_timeout(
                     stage,
                     reservation_tokens,
                     req_id=target_id,
                     reason=reason,
                 )
             else:
-                self.legacy_ledger.record_failed(stage, reservation_tokens)
+                legacy_result = self.legacy_ledger.record_failed(
+                    stage, reservation_tokens
+                )
             try:
-                self._observe_shadow(ev, "verified.call_timeout_shadow")
+                self._observe_shadow(ev, "verified.call_timeout_shadow", legacy_result)
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_timeout failed: %s", shadow_err)
-            return VerdictKind.ACCEPTED
+            return VerdictKind(legacy_result)
         else:
             res = self._apply_bridge(ev, "verified.call_timeout")
             if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
@@ -671,7 +747,11 @@ class VerifiedLifecycleOwner:
                     "verified.validation_recorded",
                 )
             try:
-                self._observe_shadow(ev, "verified.validation_recorded_shadow")
+                self._observe_shadow(
+                    ev,
+                    "verified.validation_recorded_shadow",
+                    VerdictKind.ACCEPTED,
+                )
             except Exception as shadow_err:
                 logger.warning("Shadow bridge error recording validation: %s", shadow_err)
             return TransitionVerdict(kind=VerdictKind.ACCEPTED)

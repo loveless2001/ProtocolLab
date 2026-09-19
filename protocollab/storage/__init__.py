@@ -125,8 +125,11 @@ class Store:
         return row[0] if raw else json.loads(row[0])
 
     def get(self, owner, key, default=None):
-        row = self.db.execute("SELECT payload FROM state WHERE owner=? AND key=?", (owner, key)).fetchone()
-        return json.loads(row[0]) if row else default
+        with self.lock:
+            row = self.db.execute(
+                "SELECT payload FROM state WHERE owner=? AND key=?", (owner, key)
+            ).fetchone()
+            return json.loads(row[0]) if row else default
 
     def set(self, owner, key, payload, kind="state.revision", source=None):
         with self.transaction():

@@ -15,6 +15,16 @@ def load(path):
     return yaml.safe_load(Path(path).read_text())
 
 
+def owner_store_path(value: str | Path) -> Path:
+    path = Path(value)
+    if path.is_file():
+        return path
+    for candidate in (path / "owner" / "owner.sqlite", path / "owner.sqlite"):
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError("MISSING_OWNER_STORE")
+
+
 def main():
     parser = argparse.ArgumentParser(description="ProtocolLab: governed black-box protocol learning")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -68,6 +78,22 @@ def main():
     recover.add_argument("run")
     report = commands.add_parser("report", help="Render a Markdown report from retained episode metrics")
     report.add_argument("run")
+    shadow_monitor = commands.add_parser(
+        "shadow-monitor",
+        help="Start or evaluate a durable verified-lifecycle shadow window",
+    )
+    shadow_commands = shadow_monitor.add_subparsers(dest="shadow_command", required=True)
+    shadow_start = shadow_commands.add_parser(
+        "start", help="Start a 14-day shadow monitoring window"
+    )
+    shadow_start.add_argument("store")
+    shadow_start.add_argument("--monitor-id", required=True)
+    shadow_report = shadow_commands.add_parser(
+        "report", help="Evaluate a shadow monitoring window"
+    )
+    shadow_report.add_argument("store")
+    shadow_report.add_argument("--monitor-id", required=True)
+    shadow_report.add_argument("--output")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     if args.command == "schema":
@@ -92,6 +118,34 @@ def main():
             print(json.dumps({"status": "VERIFIED", "journal_anchor": anchor, "artifacts": count}))
         finally:
             store.close()
+    elif args.command == "shadow-monitor":
+        from protocollab.storage import Store
+        from protocollab.verified.shadow_audit import (
+            analyze_shadow_monitor,
+            start_shadow_monitor,
+        )
+
+        path = owner_store_path(args.store)
+        if args.shadow_command == "start":
+            store = Store(path, "shadow-monitor")
+            try:
+                result = start_shadow_monitor(store, args.monitor_id)
+            finally:
+                store.close()
+        else:
+            store = Store(path, "shadow-monitor", readonly=True)
+            try:
+                result = analyze_shadow_monitor(store, args.monitor_id)
+            finally:
+                store.close()
+            if args.output:
+                destination = Path(args.output)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+            if result["status"] != "PASS":
+                print(json.dumps(result, indent=2, sort_keys=True))
+                raise SystemExit(1)
+        print(json.dumps(result, indent=2, sort_keys=True))
     elif args.command == "demo":
         from protocollab.evaluation.metrics import summarize_episode
         from protocollab.evaluation.runner import run_episode
