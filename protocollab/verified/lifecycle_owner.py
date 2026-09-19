@@ -292,7 +292,7 @@ class VerifiedLifecycleOwner:
         # In shadow mode, run legacy ledger
         if self.mode == LifecycleMode.SHADOW:
             try:
-                self.legacy_ledger.reserve(stage, reservation_tokens)
+                self.legacy_ledger.reserve(stage, reservation_tokens, req_id=req_id)
             except Exception as legacy_err:
                 try:
                     self._apply_bridge(ev, "verified.call_reserved_shadow")
@@ -301,15 +301,18 @@ class VerifiedLifecycleOwner:
                 raise legacy_err
 
             try:
-                self._apply_bridge(ev, "verified.call_reserved_shadow")
+                res = self._apply_bridge(ev, "verified.call_reserved_shadow")
+                return res.verdict.kind
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel reserve failed: %s", shadow_err)
+                return VerdictKind.ACCEPTED
         else:
             res = self._apply_bridge(ev, "verified.call_reserved")
             if res.verdict.kind == VerdictKind.REJECTED:
                 raise BudgetExhausted(res.verdict.reason or "REJECTED")
             if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
                 raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
+            return res.verdict.kind
 
     def record_dispatched(self, stage: str, req_id: str | None = None):
         target_id = req_id
@@ -327,17 +330,20 @@ class VerifiedLifecycleOwner:
         ev = {"kind": "DispatchIntent", "req_id": target_id}
 
         if self.mode == LifecycleMode.SHADOW:
-            self.legacy_ledger.record_dispatched(stage)
+            self.legacy_ledger.record_dispatched(stage, req_id=target_id)
             try:
-                self._apply_bridge(ev, "verified.call_dispatched_shadow")
+                res = self._apply_bridge(ev, "verified.call_dispatched_shadow")
+                return res.verdict.kind
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_dispatched failed: %s", shadow_err)
+                return VerdictKind.ACCEPTED
         else:
             res = self._apply_bridge(ev, "verified.call_dispatched")
             if res.verdict.kind == VerdictKind.REJECTED:
                 raise BudgetExhausted(res.verdict.reason or "REJECTED")
             if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
                 raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
+            return res.verdict.kind
 
     def record_completed(
         self,
@@ -466,8 +472,15 @@ class VerifiedLifecycleOwner:
         }
 
         if self.mode == LifecycleMode.SHADOW:
-            # In legacy ledger, timeouts were zeroed via record_failed
-            self.legacy_ledger.record_failed(stage, reservation_tokens)
+            if hasattr(self.legacy_ledger, "record_timeout"):
+                self.legacy_ledger.record_timeout(
+                    stage,
+                    reservation_tokens,
+                    req_id=target_id,
+                    reason=reason,
+                )
+            else:
+                self.legacy_ledger.record_failed(stage, reservation_tokens)
             try:
                 self._apply_bridge(ev, "verified.call_timeout_shadow")
             except Exception as shadow_err:

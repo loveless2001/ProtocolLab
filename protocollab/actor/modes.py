@@ -81,6 +81,30 @@ class DecisionOutcome:
     backend_meta: dict[str, Any] = field(default_factory=dict)
 
 
+def is_transport_timeout_or_drop(exc: Exception) -> bool:
+    """Classify exceptions indicating network timeout, connection drop, or subprocess timeout after dispatch."""
+    import subprocess
+    import urllib.error
+
+    if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired, ConnectionError)):
+        return True
+    if isinstance(exc, urllib.error.URLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, (TimeoutError, ConnectionError, OSError)):
+            return True
+        if "timed out" in str(reason).lower() or "connection" in str(reason).lower():
+            return True
+    name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+    if "timeout" in name or "connection" in name or "timeouterror" in msg or "timed out" in msg:
+        return True
+    if getattr(exc, "__cause__", None) and is_transport_timeout_or_drop(exc.__cause__):
+        return True
+    if getattr(exc, "__context__", None) and is_transport_timeout_or_drop(exc.__context__):
+        return True
+    return False
+
+
 class DecisionAdapter:
     """Unified adapter executing free_json, constrained_json, or candidate_score."""
 
@@ -170,7 +194,7 @@ class DecisionAdapter:
             max_output = self.config.model_port_config.max_output_tokens
             if ledger is not None:
                 reservation = max_input + max_output
-                ledger.reserve(
+                v_res = ledger.reserve(
                     stage,
                     reservation,
                     req_id=req_id,
@@ -178,7 +202,13 @@ class DecisionAdapter:
                     max_input=max_input,
                     max_output=max_output,
                 )
-                ledger.record_dispatched(stage, req_id=req_id)
+                v_disp = ledger.record_dispatched(stage, req_id=req_id)
+                res_kind = getattr(v_res, "value", v_res)
+                disp_kind = getattr(v_disp, "value", v_disp)
+                if res_kind == "DuplicateNoop" or disp_kind == "DuplicateNoop":
+                    raise ValueError(
+                        f"DUPLICATE_REQUEST_DISPATCH: req_id {req_id!r} has already been reserved or dispatched"
+                    )
 
             # Snapshot cumulative tokens before call for delta computation (§2)
             prev_input = port.input_tokens
@@ -327,7 +357,9 @@ class DecisionAdapter:
             if sc_output > 0:
                 delta_output = sc_output
 
-            if ledger is not None and reservation is not None:
+            is_duplicate = "DUPLICATE_REQUEST_DISPATCH" in str(exc)
+
+            if ledger is not None and reservation is not None and not is_duplicate:
                 if delta_input > 0 or delta_output > 0:
                     # Model inference executed and consumed physical tokens before failure occurred.
                     # Settle consumed usage on ledger so physical consumption is not unbilled.
@@ -342,7 +374,7 @@ class DecisionAdapter:
                         req_id=req_id,
                         receipt_hash=receipt_hash,
                     )
-                elif isinstance(exc, TimeoutError):
+                elif is_transport_timeout_or_drop(exc):
                     if hasattr(ledger, "record_timeout"):
                         ledger.record_timeout(
                             stage,
@@ -372,6 +404,9 @@ class DecisionAdapter:
             if "formatted_input_byte_bound" in str(exc):
                 val_outcome = "ADMISSION_REJECTED"
                 error_meta = {"error_type": "AdmissionRejected", "reason": "formatted_input_byte_bound"}
+            elif is_duplicate:
+                val_outcome = "DUPLICATE_REQUEST"
+                error_meta = {"error_type": "DuplicateRequest", "reason": str(exc)}
             elif isinstance(exc, BudgetExhausted):
                 val_outcome = "BUDGET_EXHAUSTED"
                 error_meta = {"stop_reason": "token_limit_reached"}

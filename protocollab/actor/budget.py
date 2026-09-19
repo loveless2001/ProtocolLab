@@ -71,6 +71,7 @@ class DiagnosticLedger:
             if state.allocation.model_dump() != allocation.model_dump():
                 raise ValueError("DIAGNOSTIC_BUDGET_ALLOCATION_CHANGED")
             self.state = state
+        self._seen_req_ids: set[str] = set()
 
     def _sync(self, event_kind: str = "diagnostic.budget_updated"):
         self.store.set("diagnostic_ledger", self.run_id, self.state.model_dump(), event_kind)
@@ -102,6 +103,11 @@ class DiagnosticLedger:
         *args: Any,
         **kwargs: Any,
     ):
+        if req_id is not None:
+            if req_id in self._seen_req_ids:
+                return "DuplicateNoop"
+            self._seen_req_ids.add(req_id)
+
         stage_limits = self.state.allocation.stages.get(stage)
         stage_usage = self.state.stages.get(stage)
         agg_usage = self.state.aggregate
@@ -118,6 +124,7 @@ class DiagnosticLedger:
         agg_usage.reservations += 1
         agg_usage.reserved_tokens += reservation_tokens
         self._sync("diagnostic.call_reserved")
+        return "Accepted"
 
     def record_dispatched(self, stage: str, req_id: str | None = None, *args: Any, **kwargs: Any):
         stage_usage = self.state.stages.get(stage)
@@ -127,6 +134,7 @@ class DiagnosticLedger:
         stage_usage.dispatched_inference += 1
         agg_usage.dispatched_inference += 1
         self._sync("diagnostic.call_dispatched")
+        return "Accepted"
 
     def record_completed(
         self,
@@ -185,12 +193,8 @@ class DiagnosticLedger:
         *args: Any,
         **kwargs: Any,
     ):
-        stage_usage = self.state.stages[stage]
-        agg_usage = self.state.aggregate
-        stage_usage.failures += 1
-        stage_usage.reserved_tokens = max(0, stage_usage.reserved_tokens - reservation_tokens)
-        agg_usage.failures += 1
-        agg_usage.reserved_tokens = max(0, agg_usage.reserved_tokens - reservation_tokens)
+        # In EvTimeoutUnknown, reservation remains held against in-flight ambiguity.
+        # It is neither settled as completed nor released as conclusively failed.
         self._sync("diagnostic.call_timeout")
 
 

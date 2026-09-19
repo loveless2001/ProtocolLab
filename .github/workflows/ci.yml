@@ -15,12 +15,14 @@ jobs:
           uv sync --locked --extra local-model
       - name: Install Bun and Bend toolchain
         run: |
-          curl -fsSL https://bun.sh/install | bash
+          curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.8"
           echo "$HOME/.bun/bin" >> $GITHUB_PATH
           export PATH="$HOME/.bun/bin:$PATH"
           curl -fsSL https://bend-lang.com/install.sh | sh
           echo "$HOME/.bend/bin" >> $GITHUB_PATH
           export PATH="$HOME/.bend/bin:$PATH"
+          mkdir -p "$HOME/.bend/app/2.0.7/qgAjiA"
+          cp -r verified/lifecycle/toolchain/bend2 "$HOME/.bend/app/2.0.7/qgAjiA/"
           bun --version
           bend --version
       - name: Check sandbox Python startup

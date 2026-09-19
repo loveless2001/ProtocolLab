@@ -54,6 +54,12 @@ class FaultyBridge:
 
         if event.get("kind") == "Reserve":
             s = state.model_copy(deep=True)
+            existing = next((r for r in s.requests if r.req_id == event["req_id"]), None)
+            if existing:
+                return SimpleNamespace(
+                    state=s,
+                    verdict=SimpleNamespace(kind=VerdictKind.DUPLICATE_NOOP, intent=None, reason=None),
+                )
             r = RequestRecord(
                 req_id=event["req_id"],
                 stage=event["stage"],
@@ -68,6 +74,25 @@ class FaultyBridge:
                 ),
             )
             s.requests.insert(0, r)
+            return SimpleNamespace(
+                state=s,
+                verdict=SimpleNamespace(kind=VerdictKind.ACCEPTED, intent=None, reason=None),
+            )
+
+        if event.get("kind") == "DispatchIntent":
+            s = state.model_copy(deep=True)
+            existing = next((r for r in s.requests if r.req_id == event["req_id"]), None)
+            if existing and existing.transport in (
+                TransportState.DISPATCHED_INTENT,
+                TransportState.SENT,
+                TransportState.RESPONSE_RECEIVED,
+            ):
+                return SimpleNamespace(
+                    state=s,
+                    verdict=SimpleNamespace(kind=VerdictKind.DUPLICATE_NOOP, intent=None, reason=None),
+                )
+            if existing:
+                existing.transport = TransportState.DISPATCHED_INTENT
             return SimpleNamespace(
                 state=s,
                 verdict=SimpleNamespace(kind=VerdictKind.ACCEPTED, intent=None, reason=None),
@@ -835,6 +860,269 @@ def test_candidate_score_settles_tokens_before_candidate_validation():
     assert settle_ev["input_tokens"] == 120
     assert settle_ev["output_tokens"] == 25
     assert failure_ev is None, "Executed model call must not be released as FailureConclusive!"
+
+
+def test_explicit_same_id_redispatch_prevented():
+    """Verify that explicitly reusing an attempt ID does not permit a second physical backend call."""
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-redispatch",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="free_json",
+        renderer="demarcated",
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class CountingPort:
+        def __init__(self):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.calls = 0
+            self.input_tokens = 0
+            self.output_tokens = 0
+
+        def generate(self, packet, seed, prompt_override=None):
+            self.calls += 1
+            self.input_tokens += 100
+            self.output_tokens += 10
+            return '{"kind": "WAIT"}'
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=10, max_tokens=2000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=2000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="redispatch_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+
+    packet = {
+        "schema_version": "0.1",
+        "public_alphabet": ["TICK"],
+        "decision_basis_ref": "basis",
+        "task": {},
+    }
+    port = CountingPort()
+
+    # Call 1: Normal dispatch
+    out1 = adapter.decide(port, packet, seed=7, ledger=owner, stage="stage1", req_id="attempt-reused")
+    assert port.calls == 1
+    assert out1.validation_outcome != "DUPLICATE_REQUEST"
+
+    # Call 2: Reusing the same req_id
+    out2 = adapter.decide(port, packet, seed=7, ledger=owner, stage="stage1", req_id="attempt-reused")
+    assert port.calls == 1, "Physical model must NOT be called a second time when attempt ID is reused!"
+    assert out2.validation_outcome == "DUPLICATE_REQUEST"
+    assert out2.is_fallback
+    assert out2.total_tokens_evaluated == 0
+
+
+def test_transport_failures_route_to_timeout_unknown():
+    """Verify that subprocess.TimeoutExpired, urllib.error.URLError, and ConnectionResetError
+
+    emit TimeoutUnknown and preserve the reservation hold.
+    """
+    import subprocess
+    import urllib.error
+
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-transport-fail",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="free_json",
+        renderer="demarcated",
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class ThrowingPort:
+        def __init__(self, exc):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.input_tokens = 0
+            self.output_tokens = 0
+            self.exc = exc
+
+        def generate(self, packet, seed, prompt_override=None):
+            raise self.exc
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=10, max_tokens=2000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=2000,
+    )
+
+    exceptions = [
+        subprocess.TimeoutExpired(["worker"], 30),
+        urllib.error.URLError(TimeoutError("connection timed out")),
+        ConnectionResetError("peer reset connection"),
+    ]
+
+    for exc in exceptions:
+        bridge = FaultyBridge()
+        owner = VerifiedLifecycleOwner(
+            store=DummyStore(),
+            run_id=f"run_{type(exc).__name__}",
+            allocation=alloc,
+            config_hash="cfg",
+            mode=LifecycleMode.AUTHORITATIVE,
+            bridge=bridge,
+        )
+        packet = {
+            "schema_version": "0.1",
+            "public_alphabet": ["TICK"],
+            "decision_basis_ref": "basis",
+            "task": {},
+        }
+        outcome = adapter.decide(ThrowingPort(exc), packet, seed=7, ledger=owner, stage="stage1")
+        assert outcome.is_fallback
+
+        timeout_ev = next((e for e in bridge.events if e["kind"] == "TimeoutUnknown"), None)
+        failure_ev = next((e for e in bridge.events if e["kind"] == "FailureConclusive"), None)
+        assert timeout_ev is not None, f"{type(exc).__name__} must emit TimeoutUnknown!"
+        assert failure_ev is None, f"{type(exc).__name__} must NOT emit FailureConclusive!"
+
+
+def test_shadow_timeout_no_divergence():
+    """Verify that in SHADOW mode, timeout preserves reservation on both active legacy ledger and shadow kernel."""
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-shadow-timeout",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="free_json",
+        renderer="demarcated",
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class TimeoutPort:
+        def __init__(self):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.input_tokens = 0
+            self.output_tokens = 0
+
+        def generate(self, packet, seed, prompt_override=None):
+            raise TimeoutError("timeout after possible send")
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=10, max_tokens=5000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=5000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="shadow_timeout_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.SHADOW,
+        bridge=bridge,
+    )
+    packet = {
+        "schema_version": "0.1",
+        "public_alphabet": ["TICK"],
+        "decision_basis_ref": "basis",
+        "task": {},
+    }
+    adapter.decide(TimeoutPort(), packet, seed=7, ledger=owner, stage="stage1")
+
+    # In SHADOW mode, active legacy ledger and projected shadow kernel state must match!
+    active_usage = owner.state.aggregate
+    shadow_usage = owner.project_diagnostic_state().aggregate
+
+    assert active_usage.reserved_tokens == 1500, f"Legacy ledger must hold 1500 reserved tokens, got {active_usage.reserved_tokens}"
+    assert shadow_usage.reserved_tokens == 1500, f"Shadow kernel must hold 1500 reserved tokens, got {shadow_usage.reserved_tokens}"
+    assert active_usage.failures == 0, f"Legacy ledger must not mark timeout as conclusive failure, got {active_usage.failures}"
+    assert shadow_usage.failures == 0, f"Shadow kernel must not mark timeout as conclusive failure, got {shadow_usage.failures}"
+
+
+def test_discovery_rejects_unpinned_and_prefers_locked():
+    """Verify that find_bend_app() rejects unpinned versions and prefers locked versions over unverified direct layout."""
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from protocollab.verified.bridge import find_bend_app
+
+    # Scenario 1: locked 2.0.7 + newer 2.0.8 coexist -> must pick 2.0.7
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        for p in ["app/2.0.7/pkg/bend2/main.ts", "app/2.0.8/pkg/bend2/main.ts"]:
+            f = home / ".bend" / p
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("// placeholder")
+        with patch.dict("os.environ", {}, clear=True), patch.object(Path, "home", return_value=home):
+            res = find_bend_app()
+            assert res is not None
+            assert "2.0.7" in str(res)
+
+    # Scenario 2: only unpinned 2.0.8 exists -> must return None (reject unpinned version)
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        f = home / ".bend" / "app" / "2.0.8" / "pkg" / "bend2" / "main.ts"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("// placeholder")
+        orig_exists = Path.exists
+
+        def fake_exists(p):
+            if "lifecycle/toolchain" in str(p):
+                return False
+            return orig_exists(p)
+
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(Path, "home", return_value=home),
+            patch.object(Path, "exists", fake_exists),
+        ):
+            res = find_bend_app()
+            assert res is None, "find_bend_app must NOT accept an unpinned version when lock specifies 2.0.7!"
+
+    # Scenario 3: unverified direct layout + locked 2.0.7 coexist -> must prefer locked 2.0.7
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        for p in ["bend2/main.ts", "app/2.0.7/pkg/bend2/main.ts"]:
+            f = home / ".bend" / p
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("// placeholder")
+        with patch.dict("os.environ", {}, clear=True), patch.object(Path, "home", return_value=home):
+            res = find_bend_app()
+            assert res is not None
+            assert "app/2.0.7" in str(res), "find_bend_app must prefer verified locked tree over unverified direct layout!"
 
 
 
