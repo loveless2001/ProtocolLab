@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import math
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -15,7 +16,7 @@ from protocollab.actor import (
 )
 from protocollab.actor.diagnostic_config import DiagnosticConfig
 from protocollab.actor.pipeline import compose_and_admit_input
-from protocollab.contracts import canonical
+from protocollab.contracts import canonical, digest
 
 
 class UnsupportedConfiguration(ValueError):
@@ -80,6 +81,36 @@ class DecisionOutcome:
     backend_meta: dict[str, Any] = field(default_factory=dict)
 
 
+def is_transport_timeout_or_drop(exc: Exception, seen: set[int] | None = None) -> bool:
+    """Classify exceptions indicating network timeout, connection drop, or subprocess timeout after dispatch."""
+    import subprocess
+    import urllib.error
+
+    if seen is None:
+        seen = set()
+    if id(exc) in seen:
+        return False
+    seen.add(id(exc))
+
+    if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired, ConnectionError)):
+        return True
+    if isinstance(exc, urllib.error.URLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, (TimeoutError, ConnectionError, OSError)):
+            return True
+        if "timed out" in str(reason).lower() or "connection" in str(reason).lower():
+            return True
+    name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+    if "timeout" in name or "connection" in name or "timeouterror" in msg or "timed out" in msg:
+        return True
+    if getattr(exc, "__cause__", None) and is_transport_timeout_or_drop(exc.__cause__, seen):
+        return True
+    if getattr(exc, "__context__", None) and is_transport_timeout_or_drop(exc.__context__, seen):
+        return True
+    return False
+
+
 class DecisionAdapter:
     """Unified adapter executing free_json, constrained_json, or candidate_score."""
 
@@ -132,6 +163,221 @@ class DecisionAdapter:
         seed: int,
         ledger: Any = None,
         stage: str = "closed_loop",
+        req_id: str | None = None,
+    ) -> DecisionOutcome:
+        if ledger is not None and hasattr(ledger, "gateway"):
+            return self._decide_via_gateway(
+                port, packet, seed, ledger=ledger, stage=stage, req_id=req_id
+            )
+        return self._decide_direct(
+            port, packet, seed, ledger=ledger, stage=stage, req_id=req_id
+        )
+
+    def _decide_via_gateway(
+        self,
+        port: FrozenModelPort,
+        packet: dict[str, Any],
+        seed: int,
+        ledger: Any,
+        stage: str,
+        req_id: str | None,
+    ) -> DecisionOutcome:
+        """Run the production decision path through the single attempt gateway."""
+        from protocollab.verified.attempt import (
+            AttemptSpec,
+            OneShotPermit,
+            TransportReport,
+            UsageReport,
+            ValidationOutcome,
+            ValidationReport,
+        )
+
+        basis_ref = packet.get("decision_basis_ref", "")
+        mode = self.config.decision_mode
+        claim_refs = self._extract_claim_refs(packet)
+        self._preflight_backend(port, mode, claims=claim_refs)
+        ledger.record_admission_attempt(stage)
+
+        try:
+            _, formatted_prompt, _ = compose_and_admit_input(
+                packet,
+                self.config.model_port_config,
+                renderer=self.config.renderer,
+                store=port.store,
+                phase=port.phase,
+            )
+        except Exception:
+            return self._decide_direct(port, packet, seed, ledger=None, stage=stage)
+
+        attempt_id = req_id or f"req_{digest(formatted_prompt)[:12]}_{uuid.uuid4().hex[:8]}"
+        config_payload = (
+            port.config.model_dump(mode="json")
+            if hasattr(port.config, "model_dump")
+            else vars(port.config)
+        )
+        max_input = self.config.model_port_config.max_input_tokens
+        max_output = self.config.model_port_config.max_output_tokens
+        spec = AttemptSpec(
+            run_id=ledger.run_id,
+            attempt_id=attempt_id,
+            logical_decision_id=str(
+                packet.get("logical_decision_id")
+                or packet.get("turn_id")
+                or attempt_id
+            ),
+            stage=stage,
+            original_decision_basis_ref=basis_ref,
+            input_ref=digest(formatted_prompt),
+            backend_and_configuration_ref=digest(
+                {"port": config_payload, "seed": seed, "renderer": self.config.renderer}
+            ),
+            decision_mode=mode,
+            candidate_registry_ref=(
+                digest(self.config.candidate_registry)
+                if self.config.candidate_registry
+                else None
+            ),
+            max_input=max_input,
+            max_output=max_output,
+            declared_reservation_charge=max_input + max_output,
+        )
+        captured: dict[str, DecisionOutcome] = {}
+
+        def transport(permit: OneShotPermit) -> TransportReport:
+            if not permit.consume():
+                raise RuntimeError("EXECUTION_PERMIT_ALREADY_CONSUMED")
+            decision = self._decide_direct(
+                port, packet, seed, ledger=None, stage=stage, req_id=attempt_id
+            )
+            captured["decision"] = decision
+            final_usage = (
+                decision.validation_outcome != "INFERENCE_FAILED"
+                or decision.request_input_tokens > 0
+                or decision.request_output_tokens > 0
+            )
+            usage_kind = "VerifiedFinal" if final_usage else "Unknown"
+            receipt_ref = None
+            if final_usage:
+                receipt_ref = digest(
+                    {
+                        "attempt_id": attempt_id,
+                        "input_tokens": decision.request_input_tokens,
+                        "output_tokens": decision.request_output_tokens,
+                        "raw_response_ref": digest(decision.raw_response),
+                        "backend": config_payload,
+                    }
+                )
+            return TransportReport(
+                attempt_id=attempt_id,
+                observed_boundary_and_evidence_refs=[
+                    "model_port_invocation",
+                    digest(decision.raw_response),
+                ],
+                completion=final_usage,
+                usage=UsageReport(
+                    kind=usage_kind,
+                    input_tokens=decision.request_input_tokens,
+                    output_tokens=decision.request_output_tokens,
+                    receipt_ref=receipt_ref,
+                    raw_ref=digest(decision.raw_response),
+                ),
+                raw_response_ref=digest(decision.raw_response),
+                raw_text=decision.raw_response,
+                error_ref=(
+                    canonical(decision.backend_meta).decode("utf-8")
+                    if decision.validation_outcome == "INFERENCE_FAILED"
+                    else None
+                ),
+            )
+
+        def validate(report: TransportReport) -> ValidationReport:
+            decision = captured.get("decision")
+            if decision is None:
+                return ValidationReport(
+                    outcome=ValidationOutcome.REJECTED,
+                    reason="NO_DECISION_RESULT",
+                )
+            meta = {
+                "decision_validation_outcome": decision.validation_outcome,
+                "reasoning": decision.reasoning,
+                "final_payload": decision.final_payload,
+                "extraction_policy": decision.extraction_policy,
+                "scoring_semantics": decision.scoring_semantics,
+                "claim_refs": decision.claim_refs,
+                "backend_meta": decision.backend_meta,
+                "total_tokens_evaluated": decision.total_tokens_evaluated,
+                "is_fallback": decision.is_fallback,
+            }
+            return ValidationReport(
+                outcome=(
+                    ValidationOutcome.ACCEPTED
+                    if not decision.is_fallback
+                    else ValidationOutcome.REJECTED
+                ),
+                reason=(
+                    None if not decision.is_fallback else decision.validation_outcome
+                ),
+                parsed_payload=decision.proposal.model_dump(mode="json"),
+                winning_json=decision.final_payload,
+                compute_meta=meta,
+                evaluations=decision.candidate_evaluations,
+            )
+
+        attempt_outcome = ledger.gateway.execute_attempt(spec, transport, validate)
+        if attempt_outcome.is_no_new_execution:
+            reason = str(attempt_outcome.error or attempt_outcome.conflict or "")
+            validation_outcome = (
+                "BUDGET_EXHAUSTED"
+                if "max_" in reason or "BUDGET" in reason.upper()
+                else "DUPLICATE_REQUEST"
+            )
+            return DecisionOutcome(
+                mode=mode,
+                proposal=ActorProposal(kind="WAIT"),
+                raw_response=f"FALLBACK: {reason or 'NO_NEW_EXECUTION'}",
+                reasoning=None,
+                final_payload='{"kind":"WAIT"}',
+                extraction_policy="fallback",
+                validation_outcome=validation_outcome,
+                is_fallback=True,
+                decision_basis_ref=basis_ref,
+                claim_refs=claim_refs,
+                backend_meta={"error_type": "NoNewExecution", "reason": reason},
+            )
+
+        meta = attempt_outcome.compute_meta or {}
+        proposal = ActorProposal.model_validate(
+            attempt_outcome.parsed_payload or {"kind": "WAIT"}
+        )
+        return DecisionOutcome(
+            mode=mode,
+            proposal=proposal,
+            raw_response=attempt_outcome.raw_response or "",
+            reasoning=meta.get("reasoning"),
+            final_payload=meta.get("final_payload") or attempt_outcome.winning_json or "",
+            extraction_policy=meta.get("extraction_policy", "default"),
+            validation_outcome=meta.get(
+                "decision_validation_outcome", attempt_outcome.validation_outcome
+            ),
+            is_fallback=bool(meta.get("is_fallback", False)),
+            candidate_evaluations=attempt_outcome.evaluations,
+            total_tokens_evaluated=int(meta.get("total_tokens_evaluated", 0)),
+            decision_basis_ref=basis_ref,
+            request_input_tokens=attempt_outcome.confirmed_input,
+            request_output_tokens=attempt_outcome.confirmed_output,
+            scoring_semantics=meta.get("scoring_semantics"),
+            claim_refs=meta.get("claim_refs", claim_refs),
+            backend_meta=meta.get("backend_meta", {}),
+        )
+
+    def _decide_direct(
+        self,
+        port: FrozenModelPort,
+        packet: dict[str, Any],
+        seed: int,
+        ledger: Any = None,
+        stage: str = "closed_loop",
+        req_id: str | None = None,
     ) -> DecisionOutcome:
         basis_ref = packet.get("decision_basis_ref", "")
         mode = self.config.decision_mode
@@ -145,6 +391,11 @@ class DecisionAdapter:
             ledger.record_admission_attempt(stage)
 
         reservation = None
+        assigned_req_id = req_id
+        prev_input = getattr(port, "input_tokens", 0)
+        prev_output = getattr(port, "output_tokens", 0)
+        sc_input = 0
+        sc_output = 0
         try:
             # 3. Unified input composition and admission
             unformatted_prompt, formatted_prompt, evidence = compose_and_admit_input(
@@ -156,13 +407,32 @@ class DecisionAdapter:
             )
 
             # 4. Token reservation & dispatch
+            if assigned_req_id is None:
+                assigned_req_id = f"req_{digest(formatted_prompt)[:12]}_{uuid.uuid4().hex[:8]}"
+            req_id = assigned_req_id
+            max_input = self.config.model_port_config.max_input_tokens
+            max_output = self.config.model_port_config.max_output_tokens
             if ledger is not None:
-                reservation = (
-                    self.config.model_port_config.max_input_tokens
-                    + self.config.model_port_config.max_output_tokens
+                reservation = max_input + max_output
+                v_res = ledger.reserve(
+                    stage,
+                    reservation,
+                    req_id=req_id,
+                    basis_ref=basis_ref,
+                    max_input=max_input,
+                    max_output=max_output,
                 )
-                ledger.reserve(stage, reservation)
-                ledger.record_dispatched(stage)
+                res_kind = getattr(v_res, "value", v_res)
+                if res_kind in ("DuplicateNoop", "DUPLICATE_NOOP", "duplicate_noop"):
+                    raise ValueError(
+                        f"DUPLICATE_REQUEST_DISPATCH: req_id {req_id!r} has already been reserved or dispatched"
+                    )
+                v_disp = ledger.record_dispatched(stage, req_id=req_id)
+                disp_kind = getattr(v_disp, "value", v_disp)
+                if disp_kind in ("DuplicateNoop", "DUPLICATE_NOOP", "duplicate_noop"):
+                    raise ValueError(
+                        f"DUPLICATE_REQUEST_DISPATCH: req_id {req_id!r} has already been reserved or dispatched"
+                    )
 
             # Snapshot cumulative tokens before call for delta computation (§2)
             prev_input = port.input_tokens
@@ -228,8 +498,11 @@ class DecisionAdapter:
                     **score_kwargs,
                 )
 
+                sc_input = result.get("input_tokens", 0) if isinstance(result, dict) else 0
+                sc_output = result.get("output_tokens", 0) if isinstance(result, dict) else 0
+
                 # Strict Identity and fingerprint validation (§4)
-                if "model_id" not in result:
+                if not isinstance(result, dict) or "model_id" not in result:
                     raise ValueError("MODEL_IDENTIFIER_MISSING: result must include model_id")
                 if result["model_id"] != port.config.model_id:
                     raise ValueError(
@@ -278,8 +551,6 @@ class DecisionAdapter:
 
                 best = max(evaluations, key=lambda e: (e["score"], -e["index"]))
                 winning_json = best["candidate"]
-                sc_input = result.get("input_tokens", 0)
-                sc_output = result.get("output_tokens", 0)
                 compute_meta = result.get("compute", {
                     "logical_decisions": 1,
                     "candidate_evaluations": len(self.config.candidate_registry),
@@ -303,14 +574,63 @@ class DecisionAdapter:
 
         except Exception as exc:
             # Inference stage failed (admission, budget, transport, or candidate validation)
-            if ledger is not None and reservation is not None:
-                ledger.record_failed(stage, reservation)
+            delta_input = (getattr(port, "input_tokens", 0) - prev_input) if hasattr(port, "input_tokens") else 0
+            delta_output = (getattr(port, "output_tokens", 0) - prev_output) if hasattr(port, "output_tokens") else 0
+            if sc_input > 0:
+                delta_input = sc_input
+            if sc_output > 0:
+                delta_output = sc_output
+
+            is_duplicate = "DUPLICATE_REQUEST_DISPATCH" in str(exc)
+
+            if ledger is not None and reservation is not None and not is_duplicate:
+                if delta_input > 0 or delta_output > 0:
+                    # Model inference executed and consumed physical tokens before failure occurred.
+                    # Settle consumed usage on ledger so physical consumption is not unbilled.
+                    receipt_hash = digest(
+                        f"{req_id}:{delta_input}:{delta_output}:FAILURE:{type(exc).__name__}:{exc}"
+                    )
+                    ledger.record_completed(
+                        stage,
+                        delta_input,
+                        delta_output,
+                        reservation,
+                        req_id=req_id,
+                        receipt_hash=receipt_hash,
+                    )
+                elif is_transport_timeout_or_drop(exc):
+                    if hasattr(ledger, "record_timeout"):
+                        ledger.record_timeout(
+                            stage,
+                            reservation,
+                            req_id=req_id,
+                            reason=f"timeout:{type(exc).__name__}:{exc}",
+                        )
+                    else:
+                        ev_hash = digest(f"{req_id or 'unknown'}:TIMEOUT:{type(exc).__name__}:{exc}")
+                        ledger.record_failed(
+                            stage,
+                            reservation,
+                            req_id=req_id,
+                            evidence_hash=ev_hash,
+                        )
+                else:
+                    ev_hash = digest(f"{req_id or 'unknown'}:FAILED:{type(exc).__name__}:{exc}")
+                    ledger.record_failed(
+                        stage,
+                        reservation,
+                        req_id=req_id,
+                        evidence_hash=ev_hash,
+                    )
 
             from protocollab.learning import BudgetExhausted
             error_meta: dict[str, Any] = {}
             if "formatted_input_byte_bound" in str(exc):
                 val_outcome = "ADMISSION_REJECTED"
                 error_meta = {"error_type": "AdmissionRejected", "reason": "formatted_input_byte_bound"}
+            elif is_duplicate:
+                val_outcome = "DUPLICATE_REQUEST"
+                error_meta = {"error_type": "DuplicateRequest", "reason": str(exc)}
             elif isinstance(exc, BudgetExhausted):
                 val_outcome = "BUDGET_EXHAUSTED"
                 error_meta = {"stop_reason": "token_limit_reached"}
@@ -318,7 +638,7 @@ class DecisionAdapter:
                 raise
             else:
                 val_outcome = "INFERENCE_FAILED"
-                error_meta = {"error_type": type(exc).__name__}
+                error_meta = {"error_type": type(exc).__name__, "reason": str(exc)}
 
             return DecisionOutcome(
                 mode=mode,
@@ -329,7 +649,9 @@ class DecisionAdapter:
                 extraction_policy="fallback",
                 validation_outcome=val_outcome,
                 is_fallback=True,
-                total_tokens_evaluated=0,
+                total_tokens_evaluated=delta_input + delta_output,
+                request_input_tokens=delta_input,
+                request_output_tokens=delta_output,
                 decision_basis_ref=basis_ref,
                 claim_refs=claim_refs,
                 backend_meta=error_meta,
@@ -337,7 +659,20 @@ class DecisionAdapter:
 
         # 6. Settle inference usage immediately on ledger (§2)
         if ledger is not None:
-            ledger.record_completed(stage, inf_res.input_tokens, inf_res.output_tokens, reservation)
+            raw_val = inf_res.raw_response
+            resp_str = raw_val if isinstance(raw_val, str) else canonical(raw_val).decode("utf-8")
+            resp_hash = digest(resp_str)
+            receipt_hash = digest(
+                f"{req_id}:{inf_res.input_tokens}:{inf_res.output_tokens}:{resp_hash}"
+            )
+            ledger.record_completed(
+                stage,
+                inf_res.input_tokens,
+                inf_res.output_tokens,
+                reservation,
+                req_id=req_id,
+                receipt_hash=receipt_hash,
+            )
 
         # 7. Phase 2: Proposal Parsing and Registry Membership Validation (§2, §4)
         if mode in ("free_json", "constrained_json"):

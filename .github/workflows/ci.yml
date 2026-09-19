@@ -13,12 +13,25 @@ jobs:
           python3 -m pip install uv==0.11.1
           uv python install 3.12.3
           uv sync --locked --extra local-model
+      - name: Install Bun and Bend toolchain
+        run: |
+          curl -fsSL https://bun.sh/install | bash
+          echo "$HOME/.bun/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.bun/bin:$PATH"
+          curl -fsSL https://bend-lang.com/install.sh | sh
+          echo "$HOME/.bend/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.bend/bin:$PATH"
+          mkdir -p "$HOME/.bend/bend2"
+          cp -r verified/lifecycle/toolchain/bend2/* "$HOME/.bend/bend2/"
+          bun --version
+          bend --version
       - name: Check sandbox Python startup
         run: |
           set -euo pipefail
           uv run --no-sync python -m protocollab.isolation | tee sandbox-preflight.json
       - name: Verify
         run: |
+          bend verified/lifecycle/PROOF.bend
           uv run --no-sync ruff check protocollab protocollab_environment tests
           uv run --no-sync pytest --junitxml=acceptance.junit.xml
           uv run --no-sync python scripts/check_acceptance.py acceptance.junit.xml
