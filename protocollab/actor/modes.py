@@ -165,6 +165,220 @@ class DecisionAdapter:
         stage: str = "closed_loop",
         req_id: str | None = None,
     ) -> DecisionOutcome:
+        if ledger is not None and hasattr(ledger, "gateway"):
+            return self._decide_via_gateway(
+                port, packet, seed, ledger=ledger, stage=stage, req_id=req_id
+            )
+        return self._decide_direct(
+            port, packet, seed, ledger=ledger, stage=stage, req_id=req_id
+        )
+
+    def _decide_via_gateway(
+        self,
+        port: FrozenModelPort,
+        packet: dict[str, Any],
+        seed: int,
+        ledger: Any,
+        stage: str,
+        req_id: str | None,
+    ) -> DecisionOutcome:
+        """Run the production decision path through the single attempt gateway."""
+        from protocollab.verified.attempt import (
+            AttemptSpec,
+            OneShotPermit,
+            TransportReport,
+            UsageReport,
+            ValidationOutcome,
+            ValidationReport,
+        )
+
+        basis_ref = packet.get("decision_basis_ref", "")
+        mode = self.config.decision_mode
+        claim_refs = self._extract_claim_refs(packet)
+        self._preflight_backend(port, mode, claims=claim_refs)
+        ledger.record_admission_attempt(stage)
+
+        try:
+            _, formatted_prompt, _ = compose_and_admit_input(
+                packet,
+                self.config.model_port_config,
+                renderer=self.config.renderer,
+                store=port.store,
+                phase=port.phase,
+            )
+        except Exception:
+            return self._decide_direct(port, packet, seed, ledger=None, stage=stage)
+
+        attempt_id = req_id or f"req_{digest(formatted_prompt)[:12]}_{uuid.uuid4().hex[:8]}"
+        config_payload = (
+            port.config.model_dump(mode="json")
+            if hasattr(port.config, "model_dump")
+            else vars(port.config)
+        )
+        max_input = self.config.model_port_config.max_input_tokens
+        max_output = self.config.model_port_config.max_output_tokens
+        spec = AttemptSpec(
+            run_id=ledger.run_id,
+            attempt_id=attempt_id,
+            logical_decision_id=str(
+                packet.get("logical_decision_id")
+                or packet.get("turn_id")
+                or attempt_id
+            ),
+            stage=stage,
+            original_decision_basis_ref=basis_ref,
+            input_ref=digest(formatted_prompt),
+            backend_and_configuration_ref=digest(
+                {"port": config_payload, "seed": seed, "renderer": self.config.renderer}
+            ),
+            decision_mode=mode,
+            candidate_registry_ref=(
+                digest(self.config.candidate_registry)
+                if self.config.candidate_registry
+                else None
+            ),
+            max_input=max_input,
+            max_output=max_output,
+            declared_reservation_charge=max_input + max_output,
+        )
+        captured: dict[str, DecisionOutcome] = {}
+
+        def transport(permit: OneShotPermit) -> TransportReport:
+            if not permit.consume():
+                raise RuntimeError("EXECUTION_PERMIT_ALREADY_CONSUMED")
+            decision = self._decide_direct(
+                port, packet, seed, ledger=None, stage=stage, req_id=attempt_id
+            )
+            captured["decision"] = decision
+            final_usage = (
+                decision.validation_outcome != "INFERENCE_FAILED"
+                or decision.request_input_tokens > 0
+                or decision.request_output_tokens > 0
+            )
+            usage_kind = "VerifiedFinal" if final_usage else "Unknown"
+            receipt_ref = None
+            if final_usage:
+                receipt_ref = digest(
+                    {
+                        "attempt_id": attempt_id,
+                        "input_tokens": decision.request_input_tokens,
+                        "output_tokens": decision.request_output_tokens,
+                        "raw_response_ref": digest(decision.raw_response),
+                        "backend": config_payload,
+                    }
+                )
+            return TransportReport(
+                attempt_id=attempt_id,
+                observed_boundary_and_evidence_refs=[
+                    "model_port_invocation",
+                    digest(decision.raw_response),
+                ],
+                completion=final_usage,
+                usage=UsageReport(
+                    kind=usage_kind,
+                    input_tokens=decision.request_input_tokens,
+                    output_tokens=decision.request_output_tokens,
+                    receipt_ref=receipt_ref,
+                    raw_ref=digest(decision.raw_response),
+                ),
+                raw_response_ref=digest(decision.raw_response),
+                raw_text=decision.raw_response,
+                error_ref=(
+                    canonical(decision.backend_meta).decode("utf-8")
+                    if decision.validation_outcome == "INFERENCE_FAILED"
+                    else None
+                ),
+            )
+
+        def validate(report: TransportReport) -> ValidationReport:
+            decision = captured.get("decision")
+            if decision is None:
+                return ValidationReport(
+                    outcome=ValidationOutcome.REJECTED,
+                    reason="NO_DECISION_RESULT",
+                )
+            meta = {
+                "decision_validation_outcome": decision.validation_outcome,
+                "reasoning": decision.reasoning,
+                "final_payload": decision.final_payload,
+                "extraction_policy": decision.extraction_policy,
+                "scoring_semantics": decision.scoring_semantics,
+                "claim_refs": decision.claim_refs,
+                "backend_meta": decision.backend_meta,
+                "total_tokens_evaluated": decision.total_tokens_evaluated,
+                "is_fallback": decision.is_fallback,
+            }
+            return ValidationReport(
+                outcome=(
+                    ValidationOutcome.ACCEPTED
+                    if not decision.is_fallback
+                    else ValidationOutcome.REJECTED
+                ),
+                reason=(
+                    None if not decision.is_fallback else decision.validation_outcome
+                ),
+                parsed_payload=decision.proposal.model_dump(mode="json"),
+                winning_json=decision.final_payload,
+                compute_meta=meta,
+                evaluations=decision.candidate_evaluations,
+            )
+
+        attempt_outcome = ledger.gateway.execute_attempt(spec, transport, validate)
+        if attempt_outcome.is_no_new_execution:
+            reason = str(attempt_outcome.error or attempt_outcome.conflict or "")
+            validation_outcome = (
+                "BUDGET_EXHAUSTED"
+                if "max_" in reason or "BUDGET" in reason.upper()
+                else "DUPLICATE_REQUEST"
+            )
+            return DecisionOutcome(
+                mode=mode,
+                proposal=ActorProposal(kind="WAIT"),
+                raw_response=f"FALLBACK: {reason or 'NO_NEW_EXECUTION'}",
+                reasoning=None,
+                final_payload='{"kind":"WAIT"}',
+                extraction_policy="fallback",
+                validation_outcome=validation_outcome,
+                is_fallback=True,
+                decision_basis_ref=basis_ref,
+                claim_refs=claim_refs,
+                backend_meta={"error_type": "NoNewExecution", "reason": reason},
+            )
+
+        meta = attempt_outcome.compute_meta or {}
+        proposal = ActorProposal.model_validate(
+            attempt_outcome.parsed_payload or {"kind": "WAIT"}
+        )
+        return DecisionOutcome(
+            mode=mode,
+            proposal=proposal,
+            raw_response=attempt_outcome.raw_response or "",
+            reasoning=meta.get("reasoning"),
+            final_payload=meta.get("final_payload") or attempt_outcome.winning_json or "",
+            extraction_policy=meta.get("extraction_policy", "default"),
+            validation_outcome=meta.get(
+                "decision_validation_outcome", attempt_outcome.validation_outcome
+            ),
+            is_fallback=bool(meta.get("is_fallback", False)),
+            candidate_evaluations=attempt_outcome.evaluations,
+            total_tokens_evaluated=int(meta.get("total_tokens_evaluated", 0)),
+            decision_basis_ref=basis_ref,
+            request_input_tokens=attempt_outcome.confirmed_input,
+            request_output_tokens=attempt_outcome.confirmed_output,
+            scoring_semantics=meta.get("scoring_semantics"),
+            claim_refs=meta.get("claim_refs", claim_refs),
+            backend_meta=meta.get("backend_meta", {}),
+        )
+
+    def _decide_direct(
+        self,
+        port: FrozenModelPort,
+        packet: dict[str, Any],
+        seed: int,
+        ledger: Any = None,
+        stage: str = "closed_loop",
+        req_id: str | None = None,
+    ) -> DecisionOutcome:
         basis_ref = packet.get("decision_basis_ref", "")
         mode = self.config.decision_mode
         claim_refs = self._extract_claim_refs(packet)

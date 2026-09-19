@@ -66,12 +66,12 @@ def Laws.witness_multi_stage_completion():
   {==}
 
 # PROOF 13: Validation Accounting Invariance
-def Laws.validation_accounting_invariance(rec, s, outcome):
-  match rec:
-    case None{}:
-      {==}
-    case Some{r}:
-      {==}
+def Laws.validation_accounting_invariance(transport, charge, fault, outcome):
+  {==}
+
+# PROOF 14: Validation Never Emits an Execution Permit
+def Laws.validation_never_emits_permit(transport, charge, fault, outcome):
+  {==}
 
 # WITNESS PROOF 5: Validation Recorded Witness
 def Laws.witness_validation_recorded():

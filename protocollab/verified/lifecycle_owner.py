@@ -52,6 +52,7 @@ class VerifiedLifecycleOwner:
         self.config_hash = config_hash
         self.mode = mode
         self.bridge = bridge or VerifiedKernelBridge.get_default()
+        self._defer_shadow_observation = False
 
         # Legacy ledger maintained for shadow comparison / legacy authoritativeness
         self.legacy_ledger = DiagnosticLedger(store, run_id, allocation, config_hash)
@@ -103,21 +104,37 @@ class VerifiedLifecycleOwner:
         else:
             self.bend_state = decode_state(stored)
             self._reconstruct_routing()
-            if self.mode == LifecycleMode.SHADOW:
-                for req in self.bend_state.requests:
-                    self.legacy_ledger._seen_req_ids.add(req.req_id)
+
+        if self.mode == LifecycleMode.SHADOW:
+            self._drain_shadow_observations()
 
         from protocollab.verified.attempt import AttemptGateway
         self.gateway = AttemptGateway(self)
 
     def get_request_record(self, req_id: str):
-        """Retrieve request record by req_id from verified state."""
+        """Retrieve a request from the active authority."""
+        if self.mode == LifecycleMode.SHADOW:
+            self.legacy_ledger.refresh()
+            return self.legacy_ledger.state.attempts.get(req_id)
         self._refresh_state()
         if self.bend_state and hasattr(self.bend_state, "requests"):
             for req in self.bend_state.requests:
                 if req.req_id == req_id:
                     return req
         return None
+
+    @property
+    def active_fault(self) -> str | None:
+        if self.mode == LifecycleMode.SHADOW:
+            self.legacy_ledger.refresh()
+            return self.legacy_ledger.state.fault
+        self._refresh_state()
+        return self.bend_state.fault
+
+    def reload_from_store(self) -> None:
+        """Discard speculative in-memory state after a rolled-back transaction."""
+        self.legacy_ledger.refresh()
+        self._refresh_state()
 
     @property
     def state(self) -> DiagnosticLedgerState:
@@ -178,6 +195,11 @@ class VerifiedLifecycleOwner:
             allocation=self.allocation,
             stages=stages,
             aggregate=agg,
+            attempts={
+                req.req_id: req.model_dump(mode="json")
+                for req in self.bend_state.requests
+            },
+            fault=self.bend_state.fault,
         )
 
     def _reconstruct_routing(self):
@@ -205,9 +227,6 @@ class VerifiedLifecycleOwner:
             if latest != self.bend_state:
                 self.bend_state = latest
                 self._reconstruct_routing()
-                if self.mode == LifecycleMode.SHADOW:
-                    for req in self.bend_state.requests:
-                        self.legacy_ledger._seen_req_ids.add(req.req_id)
 
     def _sync(self, event_kind: str = "verified.lifecycle_updated"):
         encoded = encode_state(self.bend_state)
@@ -250,6 +269,16 @@ class VerifiedLifecycleOwner:
                     "output_tokens": ev.get("output_tokens"),
                     "fault": res.verdict.reason or "CONFLICTING_USAGE_AFTER_RELEASE",
                 }
+                prior = next(
+                    (req for req in self.bend_state.requests if req.req_id == target_id),
+                    None,
+                )
+                if prior is not None and prior.charge.kind == ChargeKind.RELEASED:
+                    quarantine_payload["release_evidence_hash"] = prior.charge.evidence_hash
+                elif prior is not None and prior.charge.kind == ChargeKind.SETTLED:
+                    quarantine_payload["prior_receipt_hash"] = prior.charge.receipt_hash
+                    quarantine_payload["prior_input_tokens"] = prior.charge.input_tokens
+                    quarantine_payload["prior_output_tokens"] = prior.charge.output_tokens
                 self.store.set(
                     "verified_quarantine_records",
                     f"{self.run_id}:{target_id}",
@@ -260,6 +289,46 @@ class VerifiedLifecycleOwner:
             self.bend_state = res.state
             self._sync(event_kind)
             return res
+
+    @property
+    def _shadow_pending_key(self) -> str:
+        return self.run_id
+
+    def _load_shadow_pending(self) -> list[dict[str, Any]]:
+        pending = self.store.get("verified_shadow_pending", self._shadow_pending_key)
+        return list(pending) if isinstance(pending, list) else []
+
+    def _save_shadow_pending(self, pending: list[dict[str, Any]]) -> None:
+        self.store.set(
+            "verified_shadow_pending",
+            self._shadow_pending_key,
+            pending,
+            "verified.shadow_pending_updated",
+        )
+
+    def _drain_shadow_observations(self) -> Any | None:
+        """Replay the durable active event stream into the Bend observer."""
+        latest = None
+        while True:
+            pending = self._load_shadow_pending()
+            if not pending:
+                return latest
+            item = pending[0]
+            try:
+                latest = self._apply_bridge(item["event"], item["event_kind"])
+            except Exception as shadow_err:
+                logger.warning("Verified shadow observer unavailable: %s", shadow_err)
+                return latest
+            self._save_shadow_pending(pending[1:])
+
+    def _observe_shadow(self, ev: dict[str, Any], event_kind: str) -> Any | None:
+        """Durably enqueue an active event, then make a bounded catch-up attempt."""
+        pending = self._load_shadow_pending()
+        pending.append({"event": ev, "event_kind": event_kind})
+        self._save_shadow_pending(pending)
+        if self._defer_shadow_observation or getattr(self.store, "_depth", 0) > 0:
+            return None
+        return self._drain_shadow_observations()
 
     def record_admission_attempt(self, stage: str):
         if self.mode == LifecycleMode.SHADOW:
@@ -313,28 +382,32 @@ class VerifiedLifecycleOwner:
         if self.mode == LifecycleMode.SHADOW:
             legacy_res = None
             try:
-                legacy_res = self.legacy_ledger.reserve(stage, reservation_tokens, req_id=req_id)
+                legacy_res = self.legacy_ledger.reserve(
+                    stage,
+                    reservation_tokens,
+                    req_id=req_id,
+                    basis_ref=basis_ref,
+                    max_input=mi,
+                    max_output=mo,
+                )
             except Exception as legacy_err:
-                try:
-                    self._apply_bridge(ev, "verified.call_reserved_shadow")
-                except Exception as shadow_err:
-                    logger.warning("Verified shadow kernel reserve failed: %s", shadow_err)
                 raise legacy_err
 
             try:
-                res = self._apply_bridge(ev, "verified.call_reserved_shadow")
-                if getattr(res.verdict, "kind", None) != legacy_res:
+                res = self._observe_shadow(ev, "verified.call_reserved_shadow")
+                observer_kind = getattr(
+                    getattr(res, "verdict", None), "kind", None
+                )
+                if observer_kind is not None and observer_kind != legacy_res:
                     logger.warning(
                         "Verified shadow kernel reserve divergence: legacy=%s, observer=%s",
                         legacy_res,
-                        getattr(res.verdict, "kind", None),
+                        observer_kind,
                     )
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel reserve failed: %s", shadow_err)
 
-            if legacy_res in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
-                return VerdictKind.DUPLICATE_NOOP
-            return VerdictKind.ACCEPTED
+            return VerdictKind(legacy_res)
         else:
             res = self._apply_bridge(ev, "verified.call_reserved")
             if res.verdict.kind == VerdictKind.REJECTED:
@@ -359,27 +432,21 @@ class VerifiedLifecycleOwner:
         ev = {"kind": "DispatchIntent", "req_id": target_id}
 
         if self.mode == LifecycleMode.SHADOW:
+            legacy_disp = self.legacy_ledger.record_dispatched(stage, req_id=target_id)
             res = None
             try:
-                res = self._apply_bridge(ev, "verified.call_dispatched_shadow")
+                res = self._observe_shadow(ev, "verified.call_dispatched_shadow")
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_dispatched failed: %s", shadow_err)
 
             observer_kind = getattr(res.verdict, "kind", None) if res is not None else None
-            if observer_kind == VerdictKind.DUPLICATE_NOOP:
-                return VerdictKind.DUPLICATE_NOOP
-
-            legacy_disp = self.legacy_ledger.record_dispatched(stage, req_id=target_id)
             if observer_kind is not None and observer_kind != legacy_disp:
                 logger.warning(
                     "Verified shadow kernel record_dispatched divergence: legacy=%s, observer=%s",
                     legacy_disp,
                     observer_kind,
                 )
-
-            if legacy_disp in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
-                return VerdictKind.DUPLICATE_NOOP
-            return VerdictKind.ACCEPTED
+            return VerdictKind(legacy_disp)
         else:
             res = self._apply_bridge(ev, "verified.call_dispatched")
             if res.verdict.kind == VerdictKind.REJECTED:
@@ -429,33 +496,47 @@ class VerifiedLifecycleOwner:
         }
 
         if self.mode == LifecycleMode.SHADOW:
-            # Prevent double-billing active legacy ledger on duplicate receipt (§3, §5)
-            rec = self.get_request_record(target_id)
-            is_dup = False
-            if rec is not None:
-                charge_kind = getattr(rec.charge, "kind", getattr(rec.charge, "value", str(rec.charge)))
-                if charge_kind in ("Settled", "SETTLED"):
-                    if (
-                        getattr(rec.charge, "input_tokens", None) == input_tokens
-                        and getattr(rec.charge, "output_tokens", None) == output_tokens
-                        and (getattr(rec.charge, "receipt_hash", None) == receipt_hash or not getattr(rec.charge, "receipt_hash", None))
-                    ):
-                        is_dup = True
-
-            if not is_dup:
-                self.legacy_ledger.record_completed(
-                    stage, input_tokens, output_tokens, reservation_tokens
+            prior = self.get_request_record(target_id)
+            legacy_result = self.legacy_ledger.record_completed(
+                stage,
+                input_tokens,
+                output_tokens,
+                reservation_tokens,
+                req_id=target_id,
+                receipt_hash=receipt_hash,
+            )
+            if legacy_result == "ConflictFault":
+                quarantine_payload = {
+                    "run_id": self.run_id,
+                    "req_id": target_id,
+                    "stage": stage,
+                    "receipt_hash": receipt_hash,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "fault": self.legacy_ledger.state.fault,
+                }
+                if prior is not None and prior.charge.kind == ChargeKind.RELEASED:
+                    quarantine_payload["release_evidence_hash"] = prior.charge.evidence_hash
+                elif prior is not None and prior.charge.kind == ChargeKind.SETTLED:
+                    quarantine_payload["prior_receipt_hash"] = prior.charge.receipt_hash
+                    quarantine_payload["prior_input_tokens"] = prior.charge.input_tokens
+                    quarantine_payload["prior_output_tokens"] = prior.charge.output_tokens
+                self.store.set(
+                    "verified_quarantine_records",
+                    f"{self.run_id}:{target_id}",
+                    quarantine_payload,
+                    "verified.quarantine_conflict_recorded",
                 )
             try:
-                self._apply_bridge(ev, "verified.call_completed_shadow")
+                self._observe_shadow(ev, "verified.call_completed_shadow")
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_completed failed: %s", shadow_err)
+            return VerdictKind(legacy_result)
         else:
             res = self._apply_bridge(ev, "verified.call_completed")
-            if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
-                raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
             if res.verdict.kind == VerdictKind.REJECTED:
                 raise BudgetExhausted(res.verdict.reason or "REJECTED")
+            return res.verdict.kind
 
     def record_failed(
         self,
@@ -497,17 +578,24 @@ class VerifiedLifecycleOwner:
         }
 
         if self.mode == LifecycleMode.SHADOW:
-            self.legacy_ledger.record_failed(stage, reservation_tokens)
+            legacy_result = self.legacy_ledger.record_failed(
+                stage,
+                reservation_tokens,
+                req_id=target_id,
+                evidence_hash=evidence_hash,
+            )
             try:
-                self._apply_bridge(ev, "verified.call_failed_shadow")
+                self._observe_shadow(ev, "verified.call_failed_shadow")
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_failed failed: %s", shadow_err)
+            return VerdictKind(legacy_result)
         else:
             res = self._apply_bridge(ev, "verified.call_failed")
             if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
                 raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
             if res.verdict.kind == VerdictKind.REJECTED:
                 raise BudgetExhausted(res.verdict.reason or "REJECTED")
+            return res.verdict.kind
 
     def record_timeout(
         self,
@@ -547,15 +635,17 @@ class VerifiedLifecycleOwner:
             else:
                 self.legacy_ledger.record_failed(stage, reservation_tokens)
             try:
-                self._apply_bridge(ev, "verified.call_timeout_shadow")
+                self._observe_shadow(ev, "verified.call_timeout_shadow")
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_timeout failed: %s", shadow_err)
+            return VerdictKind.ACCEPTED
         else:
             res = self._apply_bridge(ev, "verified.call_timeout")
             if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
                 raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
             if res.verdict.kind == VerdictKind.REJECTED:
                 raise BudgetExhausted(res.verdict.reason or "REJECTED")
+            return res.verdict.kind
 
     def record_validation(self, req_id: str, outcome: str) -> TransitionVerdict:
         """Record validation outcome for an attempt. Leaves accounting invariants unchanged."""
@@ -566,13 +656,22 @@ class VerifiedLifecycleOwner:
             "outcome": outcome,
         }
         if self.mode == LifecycleMode.SHADOW:
-            self.store.append(
-                "verified_lifecycle_ledger",
-                "verified.validation_recorded",
-                {"req_id": req_id, "outcome": outcome, "run_id": self.run_id},
-            )
+            payload = {"req_id": req_id, "outcome": outcome, "run_id": self.run_id}
+            if hasattr(self.store, "append"):
+                self.store.append(
+                    "verified_lifecycle_ledger",
+                    "verified.validation_recorded",
+                    payload,
+                )
+            else:
+                self.store.set(
+                    "verified_validation_records",
+                    f"{self.run_id}:{req_id}",
+                    payload,
+                    "verified.validation_recorded",
+                )
             try:
-                self._apply_bridge(ev, "verified.validation_recorded_shadow")
+                self._observe_shadow(ev, "verified.validation_recorded_shadow")
             except Exception as shadow_err:
                 logger.warning("Shadow bridge error recording validation: %s", shadow_err)
             return TransitionVerdict(kind=VerdictKind.ACCEPTED)
@@ -583,4 +682,3 @@ class VerifiedLifecycleOwner:
             if res.verdict.kind == VerdictKind.REJECTED:
                 raise BudgetExhausted(res.verdict.reason or "REJECTED")
             return res.verdict
-

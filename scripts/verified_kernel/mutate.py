@@ -77,10 +77,11 @@ MUTATIONS: dict[str, tuple[str, str, str]] = {
     ),
     "MUTATION_UNCHECKED_OVERRUN": (
         "Settles without checking bound or latching fault",
-        """actual = Nat.add(input_tokens, output_tokens)
-          is_overflow = Nat.is_gt(actual, bound)""",
-        """actual = Nat.add(input_tokens, output_tokens)
-          is_overflow = False{}""",
+        """is_overflow = Bool.or(
+            Nat.is_gt(input_tokens, max_input),
+            Nat.is_gt(output_tokens, max_output)
+          )""",
+        "is_overflow = False{}",
     ),
     "MUTATION_TERMINAL_RELEASE": (
         "Releases settled request as failed instead of rejecting",

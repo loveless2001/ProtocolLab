@@ -6,6 +6,7 @@ import atexit
 import json
 import os
 import re
+import select
 import shutil
 import subprocess
 import threading
@@ -142,8 +143,9 @@ class VerifiedKernelBridge:
     _instance: VerifiedKernelBridge | None = None
     _lock = threading.Lock()
 
-    def __init__(self, runner_path: Path | None = None):
+    def __init__(self, runner_path: Path | None = None, response_timeout: float = 5.0):
         self.runner_path = runner_path or RUNNER_SCRIPT
+        self.response_timeout = response_timeout
         self._proc: subprocess.Popen[str] | None = None
         self._io_lock = threading.Lock()
         atexit.register(self.close)
@@ -167,7 +169,7 @@ class VerifiedKernelBridge:
             if bend_app_path is None or not bend_app_path.exists():
                 raise RuntimeError(
                     f"Bend preloader not found at {bend_app_path or 'default paths'}. "
-                    "Set BEND_APP or ensure Bend 2.0.5 application files exist."
+                    "Set BEND_APP or ensure Bend 2.0.16 application files exist."
                 )
             if not self.runner_path.exists():
                 raise RuntimeError(f"Runner script not found at {self.runner_path}")
@@ -196,6 +198,17 @@ class VerifiedKernelBridge:
             line = json.dumps(cmd_dict) + "\n"
             proc.stdin.write(line)
             proc.stdin.flush()
+
+            ready, _, _ = select.select(
+                [proc.stdout], [], [], self.response_timeout
+            )
+            if not ready:
+                proc.kill()
+                proc.wait(timeout=1)
+                self._proc = None
+                raise TimeoutError(
+                    f"Verified kernel response exceeded {self.response_timeout:.3f}s"
+                )
 
             resp_line = proc.stdout.readline()
             if not resp_line:

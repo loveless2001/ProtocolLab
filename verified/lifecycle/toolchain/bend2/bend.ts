@@ -1,7 +1,7 @@
 // NOTE: this file was 99% human-designed and audited.
 // It includes Bend's trusted kernel, including interpreter and checker.
-// It has a bit of AI slop, but it is the most robust file in the repo. 
-// 
+// It has a bit of AI slop, but it is the most robust file in the repo.
+//
 // Bend
 // ====
 //

@@ -1,9 +1,13 @@
 # ProtocolLab — Bend Migration Discovery & Audit
 
-**Date:** 2026-09-18  
-**Repository Branch:** `experiment/bend-lifecycle-kernel`  
-**Base Commit:** `46f1c34d3400492ae527083a16e0b7120d84e1f5`  
-**Working Tree Status:** Clean  
+> Historical pre-migration snapshot. The current architecture and validation
+> evidence are recorded in `MIGRATION_REPORT.md`; this document preserves the
+> defects and call graph observed before the gateway migration.
+
+**Date:** 2026-09-18
+**Repository Branch:** `experiment/bend-lifecycle-kernel`
+**Base Commit:** `46f1c34d3400492ae527083a16e0b7120d84e1f5`
+**Working Tree Status:** Clean
 **Toolchain Baseline:** Bend `2.0.5` (`0b7e2b11c1054f5d0f4eb955cadb47997ef1115d`), Bun `1.3.8`, Node `25.5.0`
 
 ---

@@ -106,6 +106,12 @@ def make_spec(
     )
 
 
+def attest(gateway, report: TransportReport) -> TransportReport:
+    return gateway.trusted_evidence_adapter("deterministic_test_transport").attest(
+        report
+    )
+
+
 # ==============================================================================
 # A01: Five new attempts with identical input; each uses 100/10
 # Required assertion: Five distinct attempts/calls; total 500/50.
@@ -464,9 +470,15 @@ def test_a10_timeout_then_late_verified_receipt(store, bridge):
     late_report = TransportReport(
         attempt_id="req_a10",
         completion=True,
-        usage=UsageReport(kind="VerifiedFinal", input_tokens=80, output_tokens=15),
+        usage=UsageReport(
+            kind="VerifiedFinal",
+            input_tokens=80,
+            output_tokens=15,
+            receipt_ref="late-receipt-a10",
+        ),
         raw_text='{"action": "LATE"}',
     )
+    late_report = attest(gateway, late_report)
     res_ev1 = gateway.record_evidence("req_a10", late_report)
     assert res_ev1.accounting_status == AccountingStatus.SETTLED
 
@@ -561,9 +573,24 @@ def test_a11_shadow_mode_isolation(store, bridge):
         prep_sc = owner_sc.gateway.prepare(spec_sc)
         assert isinstance(prep_sc, PrepareReady)
 
+        # Reconstruct the active owner before claim. Observer availability or
+        # disagreement must not manufacture or suppress an active grant.
+        owner_sc = make_owner(store, run_id, obs_bridge, mode=LifecycleMode.SHADOW)
         claim_sc = owner_sc.gateway.claim_start(f"req_{scenario}")
         assert isinstance(claim_sc, ClaimGranted), f"Scenario {scenario} failed active grant!"
         assert owner_sc.state.aggregate.dispatched_inference == 1
+        if offline:
+            obs_bridge.unavailable = False
+            caught_up = make_owner(
+                store, run_id, obs_bridge, mode=LifecycleMode.SHADOW
+            )
+            observed = next(
+                req
+                for req in caught_up.bend_state.requests
+                if req.req_id == f"req_{scenario}"
+            )
+            assert observed.transport == TransportState.DISPATCHED_INTENT
+            assert store.get("verified_shadow_pending", run_id) == []
 
 
 # ==============================================================================
@@ -586,10 +613,18 @@ def test_a12_crash_before_after_evidence_commits(store, bridge):
     # Commit evidence and verify state persists across another restart
     owner2.gateway.record_evidence(
         "req_a12",
-        TransportReport(
-            attempt_id="req_a12",
-            completion=True,
-            usage=UsageReport(kind="VerifiedFinal", input_tokens=70, output_tokens=10),
+        attest(
+            owner2.gateway,
+            TransportReport(
+                attempt_id="req_a12",
+                completion=True,
+                usage=UsageReport(
+                    kind="VerifiedFinal",
+                    input_tokens=70,
+                    output_tokens=10,
+                    receipt_ref="receipt-a12",
+                ),
+            ),
         ),
     )
     owner3 = make_owner(store, "run_a12", bridge)
@@ -597,6 +632,98 @@ def test_a12_crash_before_after_evidence_commits(store, bridge):
     assert rec3.charge.kind == ChargeKind.SETTLED
     assert rec3.charge.input_tokens == 70
     assert rec3.charge.output_tokens == 10
+
+
+def test_prepare_rolls_back_reservation_when_spec_persistence_fails(
+    store, bridge, monkeypatch
+):
+    owner = make_owner(store, "run_prepare_atomic", bridge)
+    original_set = store.set
+
+    def fail_spec(owner_name, key, payload, kind="state.revision", source=None):
+        if owner_name == "verified_attempt_specs":
+            raise RuntimeError("INJECTED_SPEC_WRITE_FAILURE")
+        return original_set(owner_name, key, payload, kind, source)
+
+    monkeypatch.setattr(store, "set", fail_spec)
+    with pytest.raises(RuntimeError, match="INJECTED_SPEC_WRITE_FAILURE"):
+        owner.gateway.prepare(make_spec(owner.run_id, "req_atomic_prepare"))
+    monkeypatch.setattr(store, "set", original_set)
+
+    restarted = make_owner(store, owner.run_id, bridge)
+    assert restarted.get_request_record("req_atomic_prepare") is None
+    changed = make_spec(
+        owner.run_id,
+        "req_atomic_prepare",
+        prompt="different prompt after rolled-back prepare",
+    )
+    assert isinstance(restarted.gateway.prepare(changed), PrepareReady)
+
+
+def test_evidence_accounting_and_outcome_are_one_transaction(
+    store, bridge, monkeypatch
+):
+    owner = make_owner(store, "run_evidence_atomic", bridge)
+    spec = make_spec(owner.run_id, "req_atomic_evidence")
+    assert isinstance(owner.gateway.prepare(spec), PrepareReady)
+    assert isinstance(owner.gateway.claim_start(spec.attempt_id), ClaimGranted)
+    report = attest(
+        owner.gateway,
+        TransportReport(
+            attempt_id=spec.attempt_id,
+            completion=True,
+            usage=UsageReport("VerifiedFinal", 70, 5, "atomic-receipt"),
+        ),
+    )
+    original_set = store.set
+
+    def fail_outcome(owner_name, key, payload, kind="state.revision", source=None):
+        if owner_name == "verified_attempt_outcomes":
+            raise RuntimeError("INJECTED_OUTCOME_WRITE_FAILURE")
+        return original_set(owner_name, key, payload, kind, source)
+
+    monkeypatch.setattr(store, "set", fail_outcome)
+    with pytest.raises(RuntimeError, match="INJECTED_OUTCOME_WRITE_FAILURE"):
+        owner.gateway.record_evidence(spec.attempt_id, report)
+    monkeypatch.setattr(store, "set", original_set)
+
+    restarted = make_owner(store, owner.run_id, bridge)
+    rec = restarted.get_request_record(spec.attempt_id)
+    assert rec.charge.kind == ChargeKind.PENDING
+    key = f"{owner.run_id}:{spec.attempt_id}"
+    assert store.get("verified_attempt_outcomes", key) is None
+    assert store.get("verified_attempt_evidence", key) is None
+
+
+def test_restart_after_evidence_resumes_validation_without_backend_call(store, bridge):
+    owner = make_owner(store, "run_resume_validation", bridge)
+    spec = make_spec(owner.run_id, "req_resume_validation")
+    assert isinstance(owner.gateway.prepare(spec), PrepareReady)
+    assert isinstance(owner.gateway.claim_start(spec.attempt_id), ClaimGranted)
+    report = attest(
+        owner.gateway,
+        TransportReport(
+            attempt_id=spec.attempt_id,
+            completion=True,
+            raw_text='{"kind":"WAIT"}',
+            usage=UsageReport("VerifiedFinal", 70, 5, "resume-validation-receipt"),
+        ),
+    )
+    owner.gateway.record_evidence(spec.attempt_id, report)
+
+    restarted = make_owner(store, owner.run_id, bridge)
+    resumed = restarted.gateway.execute_attempt(
+        spec,
+        lambda permit: pytest.fail("backend must not run during validation recovery"),
+        lambda retained: ValidationReport(
+            ValidationOutcome.ACCEPTED,
+            parsed_payload={"kind": "WAIT"},
+        ),
+    )
+    assert resumed.is_no_new_execution is True
+    assert resumed.validation_outcome == ValidationOutcome.ACCEPTED.value
+    assert resumed.accounting_status == AccountingStatus.SETTLED
+    assert resumed.confirmed_input == 70
 
 
 # ==============================================================================
@@ -616,9 +743,14 @@ def test_a13_over_bound_bill_latches_conflict(store, bridge):
     over_report = TransportReport(
         attempt_id="req_a13",
         completion=True,
-        usage=UsageReport(kind="VerifiedFinal", input_tokens=200, output_tokens=50),
+        usage=UsageReport(
+            kind="VerifiedFinal",
+            input_tokens=200,
+            output_tokens=50,
+            receipt_ref="over-bound-receipt-a13",
+        ),
     )
-    gateway.record_evidence("req_a13", over_report)
+    gateway.record_evidence("req_a13", attest(gateway, over_report))
 
     # Bend kernel latched bound violation fault
     assert owner.bend_state.fault is not None
@@ -629,6 +761,179 @@ def test_a13_over_bound_bill_latches_conflict(store, bridge):
     prep2 = gateway.prepare(spec2)
     assert getattr(prep2, "reason", None) is not None
     assert "STATE_FAULT_LATCHED" in prep2.reason
+
+
+def test_fault_does_not_block_settlement_for_already_started_attempt(store, bridge):
+    owner = make_owner(store, "run_fault_settlement", bridge, mode=LifecycleMode.AUTHORITATIVE)
+    first = make_spec("run_fault_settlement", "req_fault_a", max_input=100, max_output=10)
+    second = make_spec("run_fault_settlement", "req_fault_b", max_input=100, max_output=10)
+    assert isinstance(owner.gateway.prepare(first), PrepareReady)
+    assert isinstance(owner.gateway.prepare(second), PrepareReady)
+    assert isinstance(owner.gateway.claim_start(first.attempt_id), ClaimGranted)
+    assert isinstance(owner.gateway.claim_start(second.attempt_id), ClaimGranted)
+
+    over = attest(
+        owner.gateway,
+        TransportReport(
+            attempt_id=first.attempt_id,
+            completion=True,
+            usage=UsageReport("VerifiedFinal", 200, 50, "faulting-receipt"),
+        ),
+    )
+    owner.gateway.record_evidence(first.attempt_id, over)
+    assert owner.active_fault == "BOUND_VIOLATION_FAULT"
+
+    valid = attest(
+        owner.gateway,
+        TransportReport(
+            attempt_id=second.attempt_id,
+            completion=True,
+            usage=UsageReport("VerifiedFinal", 80, 5, "valid-after-fault"),
+        ),
+    )
+    result = owner.gateway.record_evidence(second.attempt_id, valid)
+    assert result.accounting_status == AccountingStatus.SETTLED
+    assert owner.get_request_record(second.attempt_id).charge.kind == ChargeKind.SETTLED
+
+
+def test_individual_input_output_caps_are_enforced(store, bridge):
+    owner = make_owner(store, "run_individual_caps", bridge, mode=LifecycleMode.AUTHORITATIVE)
+    spec = make_spec(owner.run_id, "req_individual_caps", max_input=100, max_output=10)
+    assert isinstance(owner.gateway.prepare(spec), PrepareReady)
+    assert isinstance(owner.gateway.claim_start(spec.attempt_id), ClaimGranted)
+    # Total 105 is below the combined reservation 110, but input exceeds its
+    # independently declared cap.
+    report = attest(
+        owner.gateway,
+        TransportReport(
+            attempt_id=spec.attempt_id,
+            completion=True,
+            usage=UsageReport("VerifiedFinal", 105, 0, "input-cap-receipt"),
+        ),
+    )
+    owner.gateway.record_evidence(spec.attempt_id, report)
+    assert owner.active_fault == "BOUND_VIOLATION_FAULT"
+
+
+def test_late_verified_receipt_after_release_is_charged_and_quarantined(store, bridge):
+    owner = make_owner(store, "run_late_after_release", bridge, mode=LifecycleMode.AUTHORITATIVE)
+    spec = make_spec("run_late_after_release", "req_late_release")
+
+    released = owner.gateway.execute_attempt(
+        spec,
+        lambda permit: TransportReport(
+            attempt_id=permit.attempt_id,
+            not_sent_proof_ref="trusted-pre-send-cancellation",
+        ),
+        lambda report: ValidationReport(ValidationOutcome.NOT_ATTEMPTED),
+    )
+    assert released.accounting_status == AccountingStatus.RELEASED
+
+    late = attest(
+        owner.gateway,
+        TransportReport(
+            attempt_id=spec.attempt_id,
+            completion=True,
+            usage=UsageReport("VerifiedFinal", 80, 5, "late-after-release"),
+        ),
+    )
+    verdict = owner.gateway.record_evidence(spec.attempt_id, late)
+    assert verdict.accounting_status == AccountingStatus.SETTLED
+    assert owner.active_fault == "CONFLICTING_USAGE_AFTER_RELEASE"
+    rec = owner.get_request_record(spec.attempt_id)
+    assert rec.charge.kind == ChargeKind.SETTLED
+    assert rec.charge.input_tokens == 80
+    assert rec.charge.output_tokens == 5
+    quarantine = store.get(
+        "verified_quarantine_records", f"{owner.run_id}:{spec.attempt_id}"
+    )
+    assert quarantine["release_evidence_hash"] == "trusted-pre-send-cancellation"
+    assert quarantine["receipt_hash"] == "late-after-release"
+
+
+def test_conflicting_final_bills_preserve_first_settlement_and_both_receipts(
+    store, bridge
+):
+    owner = make_owner(store, "run_conflicting_bills", bridge, mode=LifecycleMode.AUTHORITATIVE)
+    spec = make_spec(owner.run_id, "req_conflicting_bills")
+    assert isinstance(owner.gateway.prepare(spec), PrepareReady)
+    assert isinstance(owner.gateway.claim_start(spec.attempt_id), ClaimGranted)
+    first = attest(
+        owner.gateway,
+        TransportReport(
+            attempt_id=spec.attempt_id,
+            completion=True,
+            usage=UsageReport("VerifiedFinal", 70, 5, "first-final-receipt"),
+        ),
+    )
+    owner.gateway.record_evidence(spec.attempt_id, first)
+
+    conflicting = attest(
+        owner.gateway,
+        TransportReport(
+            attempt_id=spec.attempt_id,
+            completion=True,
+            usage=UsageReport("VerifiedFinal", 60, 4, "second-final-receipt"),
+        ),
+    )
+    verdict = owner.gateway.record_evidence(spec.attempt_id, conflicting)
+    assert verdict.accounting_status == AccountingStatus.SETTLED
+    rec = owner.get_request_record(spec.attempt_id)
+    assert (rec.charge.input_tokens, rec.charge.output_tokens) == (70, 5)
+    outcome = owner.gateway._load_outcome(spec.attempt_id)
+    assert (outcome.confirmed_input, outcome.confirmed_output) == (70, 5)
+    quarantine = store.get(
+        "verified_quarantine_records", f"{owner.run_id}:{spec.attempt_id}"
+    )
+    assert quarantine["prior_receipt_hash"] == "first-final-receipt"
+    assert quarantine["receipt_hash"] == "second-final-receipt"
+
+
+def test_untrusted_evidence_cannot_release_or_settle(store, bridge):
+    owner = make_owner(store, "run_untrusted_evidence", bridge)
+    spec = make_spec("run_untrusted_evidence", "req_untrusted")
+    assert isinstance(owner.gateway.prepare(spec), PrepareReady)
+
+    verdict = owner.gateway.record_evidence(
+        spec.attempt_id,
+        TransportReport(
+            attempt_id=spec.attempt_id,
+            not_sent_proof_ref="caller-controlled-proof",
+        ),
+    )
+    assert verdict.reason == "UNTRUSTED_EVIDENCE_SOURCE"
+    assert owner.get_request_record(spec.attempt_id).charge.kind == ChargeKind.PENDING
+    quarantined = [
+        event
+        for event in store.events()
+        if event["owner"] == "verified_untrusted_evidence"
+    ]
+    assert len(quarantined) == 1
+    assert quarantined[0]["payload"]["value"]["reason"] == "UNTRUSTED_EVIDENCE_SOURCE"
+
+
+def test_transport_report_freezes_observed_evidence_refs():
+    refs = ["provider-response", "usage-receipt"]
+    report = TransportReport(
+        attempt_id="req_immutable_evidence",
+        observed_boundary_and_evidence_refs=refs,
+    )
+
+    refs.append("caller-mutation")
+    assert report.observed_boundary_and_evidence_refs == (
+        "provider-response",
+        "usage-receipt",
+    )
+
+
+def test_attempt_binding_hash_uses_structured_canonical_encoding():
+    base = make_spec("run_binding_hash", "req_binding")
+    from dataclasses import replace
+
+    assert base.binding_hash != replace(base, candidate_registry_ref="None").binding_hash
+    left = replace(base, input_ref="x:y", backend_and_configuration_ref="z")
+    right = replace(base, input_ref="x", backend_and_configuration_ref="y:z")
+    assert left.binding_hash != right.binding_hash
 
 
 # ==============================================================================
@@ -715,10 +1020,13 @@ def test_no_execution_failure_path_blocks_action_dispatch(store, bridge):
     # Cancelled before start
     gateway.record_evidence(
         "req_no_exec",
-        TransportReport(
-            attempt_id="req_no_exec",
-            completion=False,
-            not_sent_proof_ref="cancelled_unstarted",
+        attest(
+            gateway,
+            TransportReport(
+                attempt_id="req_no_exec",
+                completion=False,
+                not_sent_proof_ref="cancelled_unstarted",
+            ),
         ),
     )
     outcome = gateway.execute_attempt(
@@ -814,9 +1122,13 @@ def test_late_receipt_duplicate_does_not_double_count_active(store, bridge):
     s = make_spec(run_id, "req_p5", max_input=100, max_output=10)
 
     # First attempt times out
+    def timed_out(permit):
+        assert permit.consume()
+        return TransportReport(attempt_id=permit.attempt_id, error_ref="timeout")
+
     owner.gateway.execute_attempt(
         s,
-        lambda permit: TransportReport(attempt_id=permit.attempt_id, error_ref="timeout"),
+        timed_out,
         lambda r: ValidationReport(ValidationOutcome.REJECTED),
     )
 
@@ -826,6 +1138,7 @@ def test_late_receipt_duplicate_does_not_double_count_active(store, bridge):
         usage=UsageReport("VerifiedFinal", 80, 15, "late-receipt-p5"),
         raw_text="LATE_RESPONSE",
     )
+    late = attest(owner.gateway, late)
     owner.gateway.record_evidence("req_p5", late)
     assert owner.state.aggregate.completed_calls == 1
     assert owner.state.aggregate.input_tokens == 80
@@ -939,4 +1252,3 @@ def test_validator_exception_produces_structured_rejection(store, bridge):
     assert owner.state.aggregate.input_tokens == 100
     assert owner.state.aggregate.output_tokens == 10
     assert len(owner.gateway._outcomes) == 1
-

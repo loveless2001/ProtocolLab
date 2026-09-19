@@ -8,6 +8,7 @@ from protocollab.verified.attempt import (
     ExecutionState,
     OneShotPermit,
     TransportReport,
+    TrustedEvidenceAdapter,
     UsageReport,
     ValidationOutcome,
     ValidationReport,
@@ -54,7 +55,7 @@ __all__ = [
     "ValidationOutcome",
     "ValidationReport",
     "OneShotPermit",
+    "TrustedEvidenceAdapter",
     "TransportReport",
     "UsageReport",
 ]
-

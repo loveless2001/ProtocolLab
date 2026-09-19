@@ -22,7 +22,7 @@
       },
       "bend.ts": {
         "path": "verified/lifecycle/toolchain/bend2/bend.ts",
-        "sha256": "47e1b06e2fa4466bad702f86d8cbce03f40e833a8ba8eaa1e04297fa46dc94a9"
+        "sha256": "1e3d07609f8f728bfa756e266ccc17c2dcef4644442a1fcb956779ac0f92d975"
       },
       "base.bend": {
         "path": "verified/lifecycle/toolchain/bend2/base.bend",

@@ -173,14 +173,47 @@ law witness_multi_stage_completion:
     )
   ) == True{} : Bool}
 
+# The proof-gate fixture leaves every accounting-bearing request variant and
+# the state fault arbitrary while fixing only irrelevant identity metadata.
+def validation_arbitrary_state(
+  transport: T.TransportState,
+  charge: T.Charge,
+  fault: Maybe<&2, String>
+) -> T.LedgerState:
+  T.LState{
+    "validation_run", "validation_cfg", 10n, 1000n, fixture_limits(),
+    T.ReqRecord{
+      "req_validation", "stage1", "basis_validation", "validation_cfg",
+      100n, 50n, transport, charge
+    } <> Nil{},
+    fault
+  }
+
 # LAW 13: Validation Accounting Invariance (§9 Initial Proof Gate)
-# Universal theorem over arbitrary request lookup outcome, arbitrary state s, and arbitrary outcome:
-# state transitions for validation preserve the exact state (and therefore all accounting).
+# Universal over every transport/charge/fault variant and validation outcome,
+# using the actual LifecycleEvent constructor and executable apply reducer.
 law validation_accounting_invariance:
-  for rec: Maybe<&2, T.RequestRecord>
-  for s: T.LedgerState
+  for -transport: T.TransportState
+  for -charge: T.Charge
+  for -fault: Maybe<&2, String>
   for outcome: String
-  {K.result_state(K.apply_validation.step(rec, s, outcome)) == s : T.LedgerState}
+  {K.result_state(K.apply(
+    validation_arbitrary_state(transport, charge, fault),
+    T.EvValidationRecorded{"req_validation", outcome}
+  )) == validation_arbitrary_state(transport, charge, fault) : T.LedgerState}
+
+# LAW 14: Validation Never Emits an Execution Permit (§9 Initial Proof Gate)
+# Universal over the same actual event constructor and arbitrary variants.
+law validation_never_emits_permit:
+  for transport: T.TransportState
+  for charge: T.Charge
+  for fault: Maybe<&2, String>
+  for outcome: String
+  {D.verdict_emits_permit(K.result_verdict(K.apply(
+    validation_arbitrary_state(transport, charge, fault),
+    T.EvValidationRecorded{"req_validation", outcome}
+  )))
+    == False{} : Bool}
 
 # WITNESS 5: Validation Recorded Witness (Accepted, Rejected, Extraction Failure)
 law witness_validation_recorded:

@@ -8,24 +8,24 @@
   "verification_status": "ALL_TERMS_CHECK",
   "files": {
     "Types.bend": {
-      "sha256": "86a26d72367428341d2c44f26815cd4e65fcff4d1c5d73c52c1cd9c36b951040",
-      "bytes": 2138
+      "sha256": "d8121a855391ff91f0b414f091173908c7d997d037f568f8a9bd6e5a67595506",
+      "bytes": 2194
     },
     "Definitions.bend": {
-      "sha256": "4b07c6c032be332f26e5992eff8024584a5a17b678ae347eaf362a8d497a36d3",
-      "bytes": 7281
+      "sha256": "67b9c4798ffddb031c18353fdf0b157d4f89d57ed4e29c64b3d2463b4bc8ae10",
+      "bytes": 8185
     },
     "Kernel.bend": {
-      "sha256": "c9f92eb73761cb2cb739d08fcae41ee395f77c07d16fb07fa2186eda658f6efa",
-      "bytes": 22288
+      "sha256": "de86f8d825d7b30a9a51aa9cf0826e38f8af7ba2ac38d23825a0a6b20c2a143e",
+      "bytes": 22414
     },
     "LAWS.bend": {
-      "sha256": "fe12f91f9f335b6fb8bef9fdc16101c46dc976eaffc603e1289649cda9941505",
-      "bytes": 7564
+      "sha256": "37dd0f9cd9260666a3dc3f619e00a44de73f89a2d762e7594093e363dae358c8",
+      "bytes": 8702
     },
     "PROOF.bend": {
-      "sha256": "662af2a6ddf1498fba30e87564ae2050fcbf0407e31a06f4dcdfacb4b8d2c8f8",
-      "bytes": 1682
+      "sha256": "a7bbc5d624dd7cf97fb3d65af93a9771cc2799278e0f489ca83902d5e08a46b9",
+      "bytes": 1775
     }
   },
   "laws": [
@@ -41,7 +41,8 @@
     "LAW-FAULT-LATCHING",
     "LAW-CROSS-STAGE-INDEPENDENCE",
     "LAW-EVIDENCE-INTEGRITY",
-    "LAW-VALIDATION-ACCOUNTING-INVARIANCE"
+    "LAW-VALIDATION-ACCOUNTING-INVARIANCE",
+    "LAW-VALIDATION-NEVER-EMITS-PERMIT"
   ],
   "witnesses": [
     "WITNESS-POSITIVE-SETTLEMENT",

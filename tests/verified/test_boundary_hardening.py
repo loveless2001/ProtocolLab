@@ -405,9 +405,10 @@ def test_lifecycle_owner_quarantine_evidence_retention():
         mode=LifecycleMode.AUTHORITATIVE,
         bridge=ConflictBridge(),
     )
-    with pytest.raises(RuntimeError) as exc_info:
-        owner.record_completed("stage1", 60, 10, 160, req_id="r1", receipt_hash="QUARANTINE_RECEIPT_999")
-    assert "CONFLICTING_USAGE_AFTER_RELEASE" in str(exc_info.value)
+    verdict = owner.record_completed(
+        "stage1", 60, 10, 160, req_id="r1", receipt_hash="QUARANTINE_RECEIPT_999"
+    )
+    assert verdict == VerdictKind.CONFLICT_FAULT
 
     # Verify quarantine evidence is stored
     found_receipt = any("QUARANTINE_RECEIPT_999" in str(rec) for rec in store.records)
@@ -471,9 +472,10 @@ def test_lifecycle_owner_quarantine_crash_gap_closed():
 
     # Second attempt (after store recovery): retry successfully persists evidence and latches fault
     store.fail_evidence = False
-    with pytest.raises(RuntimeError) as exc2:
-        owner.record_completed("stage1", 60, 10, 160, req_id="r1", receipt_hash="CRASH_RECEIPT")
-    assert "CONFLICTING_USAGE_AFTER_RELEASE" in str(exc2.value)
+    verdict = owner.record_completed(
+        "stage1", 60, 10, 160, req_id="r1", receipt_hash="CRASH_RECEIPT"
+    )
+    assert verdict == VerdictKind.CONFLICT_FAULT
 
     # Verify evidence is now cleanly stored
     quarantine_entry = store.get("verified_quarantine_records", "crash_gap_run:r1")
@@ -1415,8 +1417,3 @@ def test_shadow_mode_reopened_owner_prevents_duplicate_reservation_leak():
     # Ensure legacy ledger reserved_tokens is NOT leaked
     assert owner2.state.aggregate.reserved_tokens == 0
     assert owner2.project_diagnostic_state().aggregate.reserved_tokens == 0
-
-
-
-
-

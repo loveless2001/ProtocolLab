@@ -272,7 +272,7 @@ def check_settle_overflow(
             T.ChargeSettled{input_tokens, output_tokens, receipt_hash}
           } : T.RequestRecord}
           T.TransResult{
-            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), None{}},
+            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
             T.Accepted{None{}}
           }
 
@@ -296,8 +296,10 @@ def apply_settle.step(
           )
           check_settle_same(same, state)
         case T.ChargePending{bound}:
-          actual = Nat.add(input_tokens, output_tokens)
-          is_overflow = Nat.is_gt(actual, bound)
+          is_overflow = Bool.or(
+            Nat.is_gt(input_tokens, max_input),
+            Nat.is_gt(output_tokens, max_output)
+          )
           check_settle_overflow(
             is_overflow, state, id, stage, basis_ref, config_hash,
             max_input, max_output, input_tokens, output_tokens, receipt_hash
@@ -305,8 +307,13 @@ def apply_settle.step(
         case T.ChargeReleased{ev_hash}:
           match state:
             case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
+              updated = {T.ReqRecord{
+                id, stage, basis_ref, config_hash, max_input, max_output,
+                T.ResponseReceived{},
+                T.ChargeSettled{input_tokens, output_tokens, receipt_hash}
+              } : T.RequestRecord}
               T.TransResult{
-                T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, Some{"CONFLICTING_USAGE_AFTER_RELEASE"}},
+                T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), Some{"CONFLICTING_USAGE_AFTER_RELEASE"}},
                 T.ConflictFault{"CONFLICTING_USAGE_AFTER_RELEASE"}
               }
 
@@ -332,18 +339,11 @@ def apply_settle(
 ) -> T.TransitionResult:
   match state:
     case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, +requests, fault}:
-      match fault:
-        case Some{reason}:
-          T.TransResult{
-            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, Some{reason}},
-            T.Rejected{"STATE_FAULT_LATCHED"}
-          }
-        case None{}:
-          apply_settle.find_step(
-            D.find_request(requests, req_id),
-            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, None{}},
-            input_tokens, output_tokens, receipt_hash
-          )
+      apply_settle.find_step(
+        D.find_request(requests, req_id),
+        T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault},
+        input_tokens, output_tokens, receipt_hash
+      )
 
 def apply_timeout.step(
   existing: Maybe<&2, T.RequestRecord>,
@@ -402,17 +402,10 @@ def apply_timeout.step(
 def apply_timeout(state: T.LedgerState, req_id: String, reason: String) -> T.TransitionResult:
   match state:
     case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, +requests, fault}:
-      match fault:
-        case Some{f_reason}:
-          T.TransResult{
-            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, Some{f_reason}},
-            T.Rejected{"STATE_FAULT_LATCHED"}
-          }
-        case None{}:
-          apply_timeout.step(
-            D.find_request(requests, req_id),
-            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, None{}}
-          )
+      apply_timeout.step(
+        D.find_request(requests, req_id),
+        T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}
+      )
 
 def apply_failure.step(
   existing: Maybe<&2, T.RequestRecord>,
@@ -446,18 +439,11 @@ def apply_failure.step(
 def apply_failure(state: T.LedgerState, req_id: String, evidence_hash: String) -> T.TransitionResult:
   match state:
     case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, +requests, fault}:
-      match fault:
-        case Some{f_reason}:
-          T.TransResult{
-            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, Some{f_reason}},
-            T.Rejected{"STATE_FAULT_LATCHED"}
-          }
-        case None{}:
-          apply_failure.step(
-            D.find_request(requests, req_id),
-            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, None{}},
-            evidence_hash
-          )
+      apply_failure.step(
+        D.find_request(requests, req_id),
+        T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault},
+        evidence_hash
+      )
 
 def apply_transport.step(
   existing: Maybe<&2, T.RequestRecord>,
@@ -517,18 +503,11 @@ def apply_transport.step(
 def apply_transport(state: T.LedgerState, req_id: String, boundary: String) -> T.TransitionResult:
   match state:
     case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, +requests, fault}:
-      match fault:
-        case Some{f_reason}:
-          T.TransResult{
-            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, Some{f_reason}},
-            T.Rejected{"STATE_FAULT_LATCHED"}
-          }
-        case None{}:
-          apply_transport.step(
-            D.find_request(requests, req_id),
-            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, None{}},
-            boundary
-          )
+      apply_transport.step(
+        D.find_request(requests, req_id),
+        T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault},
+        boundary
+      )
 
 def apply_validation.step(
   rec: Maybe<&2, T.RequestRecord>,
@@ -544,18 +523,11 @@ def apply_validation.step(
 def apply_validation(state: T.LedgerState, req_id: String, outcome: String) -> T.TransitionResult:
   match state:
     case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, +requests, fault}:
-      match fault:
-        case Some{f_reason}:
-          T.TransResult{
-            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, Some{f_reason}},
-            T.Rejected{"STATE_FAULT_LATCHED"}
-          }
-        case None{}:
-          apply_validation.step(
-            D.find_request(requests, req_id),
-            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, None{}},
-            outcome
-          )
+      apply_validation.step(
+        D.find_request(requests, req_id),
+        T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault},
+        outcome
+      )
 
 def apply(state: T.LedgerState, event: T.LifecycleEvent) -> T.TransitionResult:
   match event:

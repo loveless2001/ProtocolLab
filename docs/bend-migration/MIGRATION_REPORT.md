@@ -2,15 +2,14 @@
 
 ## 1. Executive Summary
 
-This report documents the completed migration of ProtocolLab's inference-request lifecycle and budget-accounting kernel to a proof-checked core written in **Bend 2.0.5**, integrated into an effectful Python runtime shell.
+This report documents the completed migration of ProtocolLab's inference-request lifecycle and budget-accounting kernel to a proof-checked core written in **Bend 2.0.16**, integrated into an effectful Python runtime shell.
 
 ### Key Milestones & Results
 - **Zero Paid API Calls / Zero Neural Inference Checkpoints:** Entire migration and verification were completed using local deterministic unit tests, proof checkers, and structural mutations.
-- **100% Machine-Checked Correctness:** All 12 formal lifecycle laws and 4 positive witnesses in `verified/lifecycle/LAWS.bend` are proved in `verified/lifecycle/PROOF.bend` and check cleanly (`All terms check.`).
+- **Machine-Checked Proof Gate:** All 14 formal lifecycle laws and 5 positive witnesses in `verified/lifecycle/LAWS.bend` are proved in `verified/lifecycle/PROOF.bend` and check cleanly (`All terms check.`). This claim is limited to the properties encoded by those terms.
 - **Strict Proof Hygiene:** Zero `@unsafe` keywords, zero axioms, and zero `?TODO` holes across all Bend source files.
-- **Adversarial Defect Catch Rate (11/11):** Every single one of the 11 semantic mutations introduced into the kernel was caught by machine checking, failing compilation with counterexample discrepancies.
-- **Reference Test Matrix (13/13):** All 13 reference lifecycle and accounting traces passed in `tests/verified/test_reference_traces.py`.
-- **Zero Regression (49/49):** All existing regression suites (`tests/test_negative_cases.py`, `tests/test_actor_diagnostic.py`, `tests/test_budget_per_request.py`, `tests/test_diagnostic_budget_ledger.py`, etc.) passed with 100% agreement.
+- **Adversarial Defect Catch Rate (14/14):** Each semantic mutation in `scripts/verified_kernel/mutate.py`, including validation accounting and permit mutations, is rejected by the proof gate with a checker mismatch.
+- **Acceptance Coverage:** The Python suite exercises the gateway, restart, concurrency, trusted-evidence, crash-atomicity, late-receipt, shadow-isolation, and production-decision boundaries in addition to the Bend reference traces.
 - **Production Safety:** Verified kernel runs in **`SHADOW` mode by default**, with `AUTHORITATIVE` mode available as an explicit opt-in toggle.
 
 ---
@@ -40,24 +39,24 @@ The verified kernel execution and proof verification environment is pinned via `
   "verification_status": "ALL_TERMS_CHECK",
   "files": {
     "Types.bend": {
-      "sha256": "86a26d72367428341d2c44f26815cd4e65fcff4d1c5d73c52c1cd9c36b951040",
-      "bytes": 2138
+      "sha256": "d8121a855391ff91f0b414f091173908c7d997d037f568f8a9bd6e5a67595506",
+      "bytes": 2194
     },
     "Definitions.bend": {
-      "sha256": "4b07c6c032be332f26e5992eff8024584a5a17b678ae347eaf362a8d497a36d3",
-      "bytes": 7281
+      "sha256": "67b9c4798ffddb031c18353fdf0b157d4f89d57ed4e29c64b3d2463b4bc8ae10",
+      "bytes": 8185
     },
     "Kernel.bend": {
-      "sha256": "c9f92eb73761cb2cb739d08fcae41ee395f77c07d16fb07fa2186eda658f6efa",
-      "bytes": 22288
+      "sha256": "de86f8d825d7b30a9a51aa9cf0826e38f8af7ba2ac38d23825a0a6b20c2a143e",
+      "bytes": 22414
     },
     "LAWS.bend": {
-      "sha256": "b79ac5d5637ebd7057737cf4d0e0f100840a9b86409118ea1c464e17fce9a9a0",
-      "bytes": 6520
+      "sha256": "37dd0f9cd9260666a3dc3f619e00a44de73f89a2d762e7594093e363dae358c8",
+      "bytes": 8702
     },
     "PROOF.bend": {
-      "sha256": "077f1dd7975dd8d3c558bcb0718b7c990785302899f08a32b4cdf681869cd530",
-      "bytes": 1411
+      "sha256": "a7bbc5d624dd7cf97fb3d65af93a9771cc2799278e0f489ca83902d5e08a46b9",
+      "bytes": 1775
     }
   }
 }
@@ -91,7 +90,7 @@ where $\text{TransitionResult} = (\text{LedgerState}, \text{TransitionVerdict})$
 
 ### Formal Laws & Verification Matrix
 
-All 12 laws and 4 witnesses in `verified/lifecycle/LAWS.bend` are proved via compile-time term reduction in `verified/lifecycle/PROOF.bend`:
+All 14 laws and 5 witnesses in `verified/lifecycle/LAWS.bend` are proved via compile-time term reduction in `verified/lifecycle/PROOF.bend`:
 
 | Identifier | Law Name | Machine-Checked Property Statement | Prover Output |
 | :--- | :--- | :--- | :--- |
@@ -104,31 +103,34 @@ All 12 laws and 4 witnesses in `verified/lifecycle/LAWS.bend` are proved via com
 | **LAW-7** | `conflict_immunity` | Conflicting reservation parameters latch `CONFLICTING_REQUEST_IDENTITY` | `All terms check.` |
 | **LAW-8** | `bound_honoring` | Overrun beyond $mi + mo$ latches `BOUND_VIOLATION_FAULT` and counts actual tokens | `All terms check.` |
 | **LAW-9** | `terminal_finality` | Settled request rejects release as failed (`CANNOT_RELEASE_SETTLED_REQUEST`) | `All terms check.` |
-| **LAW-10** | `fault_latching` | Faulted state rejects all subsequent transitions with `STATE_FAULT_LATCHED` | `All terms check.` |
+| **LAW-10** | `fault_latching` | Faulted state rejects a subsequent reservation with `STATE_FAULT_LATCHED` | `All terms check.` |
 | **LAW-11** | `cross_stage_independence` | Stage 1 settlement leaves Stage 2 calls, spent, and held invariant | `All terms check.` |
 | **LAW-12** | `evidence_integrity` | Re-submitting identical conclusive failure evidence evaluates to `DuplicateNoop{}` | `All terms check.` |
+| **LAW-13** | `validation_accounting_invariance` | Through the actual `EvValidationRecorded` constructor, every transport, charge, fault, and validation-outcome variant preserves the exact state | `All terms check.` |
+| **LAW-14** | `validation_never_emits_permit` | Through the same event constructor and arbitrary variants, validation never emits an inference permit | `All terms check.` |
 | **WIT-1** | `witness_positive_settlement` | Clean sequence $[R, D, T, S]$ reaches `Accepted` with exact token settlement (70 spent, 0 held) | `All terms check.` |
 | **WIT-2** | `witness_positive_release` | Clean sequence $[R, F]$ returns reserved tokens to available balance (0 spent, 0 held) | `All terms check.` |
 | **WIT-3** | `witness_positive_timeout` | Clean sequence $[R, TO]$ isolates unresolved charge without free capacity (150 held) | `All terms check.` |
 | **WIT-4** | `witness_multi_stage_completion` | Multi-stage interleaving completes with independent stage limits intact (70 s1, 50 s2) | `All terms check.` |
+| **WIT-5** | `witness_validation_recorded` | Accepted, rejected, and extraction-failure validation events emit no execution permit | `All terms check.` |
 
 ### Formal Verification Scope & Semantics
 
 1. **Ground Term Proofs vs. Universal Quantification:**
-   - In Bend 2.0.5, type-directed evaluation computes normal forms of closed expressions at compile time.
+   - In Bend 2.0.16, type-directed evaluation computes normal forms of closed expressions at compile time.
    - Law 1 (`replay_deterministic`) structurally quantifies over arbitrary event lists and states, proving syntactic reflexivity of `fold`.
-   - Laws 2–12 and Witnesses 1–4 are **ground instance theorems / verified trace invariants** evaluated over canonical reference sequences (`fixture_clean_state()`, `state_reserved()`, `state_settled()`, etc.). They establish that real execution traces strictly satisfy the invariant properties without axiomatic holes (`?TODO`) or `@unsafe` escapes.
-   - Full universal quantification over unbounded inductive lists is not automated in Bend 2.0.5 and would require manual inductive encoding; ground instance theorems provide exact, machine-checked trace safety.
+   - Laws 2–12 and Witnesses 1–5 are **ground instance theorems / verified trace invariants** evaluated over canonical reference sequences (`fixture_clean_state()`, `state_reserved()`, `state_settled()`, etc.). Laws 13 and 14 quantify universally over the validation transition inputs.
+   - Full universal quantification over unbounded inductive lists is not automated in this proof. Ground instances establish only the encoded traces and properties.
 
 2. **Hardened Kernel State Machine Invariants (Post-Review):**
-   - **Quarantine on Contradictory Usage Evidence:** Attempting to settle a request that was previously released (`ChargeReleased` / `ProvenNotSent`) represents conflicting reliable evidence (provider usage receipt vs conclusive non-dispatch proof). Rather than silently ignoring or discarding the receipt, the kernel latches a state fault (`fault = Some{"CONFLICTING_USAGE_AFTER_RELEASE"}`) and returns `ConflictFault{"CONFLICTING_USAGE_AFTER_RELEASE"}`. This quarantines the state so that subsequent admissions/transitions are rejected with `STATE_FAULT_LATCHED` while retaining the conflict evidence for audit and manual reconciliation.
+   - **Quarantine on Contradictory Usage Evidence:** A verified usage receipt after release replaces the charge with the real settled expense, latches `CONFLICTING_USAGE_AFTER_RELEASE`, and stores both the prior release evidence and late receipt in the quarantine record. The fault blocks new reserve and dispatch operations while allowing evidence ingestion for attempts that had already started.
    - **Transport Monotonicity:** Terminal transport state `ResponseReceived` is immutable: subsequent `EvTimeoutUnknown` or `EvTransportObserved` events evaluate to `DuplicateNoop{}` and cannot regress transport state to `OutcomeUnknown` or `Sent`.
 
 ---
 
 ## 4. Negative Witness & Mutation Analysis
 
-To verify that the machine-checked proofs are not vacuously true or under-constrained, 11 semantic mutations representing real-world architectural bugs were injected into `Kernel.bend` using `scripts/verified_kernel/mutate.py`.
+To verify that the machine-checked proofs are sensitive to the encoded properties, 14 semantic mutations representing lifecycle defects are injected into `Kernel.bend` using `scripts/verified_kernel/mutate.py`.
 
 ```
 ========================================================================================
@@ -156,8 +158,14 @@ MUTATION DEFECT INJECTION ANALYSIS (scripts/verified_kernel/mutate.py)
          Broken Proof : PROOF.bend (LAW-CROSS-STAGE-INDEPENDENCE counterexample)
 [CAUGHT] MUTATION_EVIDENCE_BYPASS       : Re-executes failure release without idempotency
          Broken Proof : PROOF.bend (LAW-EVIDENCE-INTEGRITY counterexample)
+[CAUGHT] MUTATION_VALIDATION_ZEROES_USAGE : Rewrites settled accounting during validation
+         Broken Proof : PROOF.bend (LAW-VALIDATION-ACCOUNTING-INVARIANCE counterexample)
+[CAUGHT] MUTATION_VALIDATION_RELEASES_HELD : Releases a pending charge during validation
+         Broken Proof : PROOF.bend (LAW-VALIDATION-ACCOUNTING-INVARIANCE counterexample)
+[CAUGHT] MUTATION_VALIDATION_EMITS_PERMIT : Emits an inference permit during validation
+         Broken Proof : PROOF.bend (LAW-VALIDATION-NEVER-EMITS-PERMIT counterexample)
 ========================================================================================
-Overall Mutation Catch Rate: 11 / 11 (100.0%)
+Overall Mutation Catch Rate: 14 / 14 (100.0%)
 ========================================================================================
 ```
 
@@ -170,7 +178,7 @@ The runtime architecture maintains separation between the purely functional veri
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Python Shell Runtime                       │
-│  DecisionAdapter.decide()  /  ActorDiagnosticHarness            │
+│  DecisionAdapter.decide() -> AttemptGateway                     │
 └────────────────────────────────┬────────────────────────────────┘
                                  │
                                  ▼
@@ -202,23 +210,23 @@ The runtime architecture maintains separation between the purely functional veri
 ```
 
 ### Measured Performance & Boundary Hardening
-- **Subprocess Startup:** Persistent daemon spawned once per session (~150ms startup).
-- **Transaction Overhead:** Sub-millisecond execution (< 0.8ms per `apply` command over stdio pipe).
 - **Flexible Toolchain Discovery & Vendored Distribution:** `find_bend_app()` dynamically resolves the Bend runner (`main.ts`) following standard Bend installation paths: explicit `BEND_APP` override, direct layout (`~/.bend/bend2/main.ts`), latest versioned trees (`~/.bend/app/*/*/bend2/main.ts`), current symlink (`~/.bend/current/bend2/main.ts`), and repository vendored fallback (`verified/lifecycle/toolchain/bend2/main.ts`). This allows seamless co-development alongside upstream Bend releases while retaining deterministic offline execution in CI.
 - **Dynamic AST Compatibility:** `runner.mjs` probes constructor namespace prefixes at startup to handle Bend compiler AST changes seamlessly across toolchain versions.
 - **Exact Numeric Representation:** All tokens and counts mapped to `BigInt` across JSON wire format, guarded by `MAX_SAFE_INT = 9_007_199_254_740_991` to prevent JS float precision loss.
-- **Duplicate Request Redispatch Prevention:** `DecisionAdapter.decide()` checks reserve and dispatch verdicts from the ledger. If `DuplicateNoop` is returned on an explicit request ID, duplicate physical execution is suppressed (`validation_outcome="DUPLICATE_REQUEST"`), preventing unmetered backend calls.
+- **Single Production Gateway:** `DecisionAdapter.decide()` constructs an immutable `AttemptSpec` and invokes the model only through `AttemptGateway.execute_attempt()`. Replays return `DUPLICATE_REQUEST` without a second model call.
 - **Comprehensive Transport Drop Classification:** Post-dispatch transport drop exceptions (`subprocess.TimeoutExpired`, `urllib.error.URLError`, `ConnectionResetError`, and `TimeoutError`) are classified as in-flight transport drops rather than pre-send failures, triggering `record_timeout` (`EvTimeoutUnknown`) to keep reservations held against provider execution ambiguity.
 - **Shadow Mode Timeout Parity:** In `SHADOW` mode, `DiagnosticLedger.record_timeout` maintains held reservations and avoids incrementing failure counters, maintaining zero divergence between legacy usage records and projected verified kernel states.
-- **Stage-Isolated Request Tracking & Receipt Mapping:** `VerifiedLifecycleOwner` maintains FIFO request queues per stage (`_stage_active_req_ids`), maps receipt hashes to settled requests (`_receipt_to_req_id`), and tracks completed requests (`_stage_last_completed`). This prevents duplicate or replayed completions from consuming pending requests in the active queue. `_reconstruct_routing()` automatically reconstructs all routing mappings upon process restart.
+- **Explicit Attempt Identity:** Gateway transitions use the exact `attempt_id`; stage queues remain compatibility helpers and do not authorize, settle, or release a physical attempt.
 - **Multi-Owner Atomic Concurrency & DB Transactions:** `_apply_bridge` serializes operations across database connections using `_store_transaction()` (`BEGIN IMMEDIATE ... COMMIT`), acquires `store.lock` in-memory, refreshes the latest state snapshot via `_refresh_state()`, applies the transition, and commits atomically.
 - **Atomic Quarantine Evidence Persistence:** Conflicting usage settlements after release trigger `CONFLICT_FAULT`. The audit evidence (`receipt_hash`, token metrics, fault reason) is persisted to `verified_quarantine_records` *before* committing the latched fault state to the primary ledger. If writing quarantine evidence fails, the faulted ledger is not committed, preventing unprovable latched fault deadlocks upon recovery.
+- **Atomic Attempt Persistence:** The complete `AttemptSpec` and reservation commit in one SQLite transaction. Raw evidence, accounting transition, outcome, and quarantine data also share one transaction; injected write failures roll the whole unit back.
+- **Trusted Evidence Boundary:** Caller-created `TransportReport` fields cannot release or settle a charge. The gateway accepts evidence attested at its invoked transport boundary or by a configured `TrustedEvidenceAdapter`; `VerifiedFinal` asynchronous evidence must carry a receipt reference.
 - **Disambiguated Request Provenance:** `DecisionAdapter` generates distinct request IDs incorporating the prompt hash and a unique invocation suffix (`req_{digest(prompt)[:12]}_{uuid.uuid4().hex[:8]}`), ensuring repeated invocations with identical prompt packets are properly isolated and tracked without false `DuplicateNoop` suppression.
 - **Cryptographic Receipt Binding:** `receipt_hash` binds the full SHA-256 hash of the model's raw response alongside token counts, guaranteeing unique receipts across different model generations.
 - **Timeout Reservation Preservation:** `TimeoutError` during inference invokes `record_timeout` (`EvTimeoutUnknown`), maintaining held reservations and setting transport to `OutcomeUnknown` rather than releasing charges as `FailureConclusive`.
 - **Candidate Score Settle-Before-Validation:** `candidate_score` mode settles confirmed token usage on the ledger immediately upon return from `port.score_candidates`, ensuring that subsequent candidate vector validation failures result in fallback proposals without forfeiting physical token billing.
 - **Automated CI Toolchain Execution:** `.github/workflows/ci.yml` installs Bun and the Bend compiler, provisions the Bend runner, verifies `PROOF.bend`, and executes the verified test suite directly in CI with zero skipped tests.
-- **Fail-Safe Shadow Execution:** All shadow-mode bridge calls (including initialization and transitions) are wrapped in non-propagating exception handlers with warning logs, ensuring bridge errors never fail production callers.
+- **Bounded Shadow Bridge:** Stdio responses have a fixed timeout, and shadow transition errors are non-propagating. The durable Python attempt ledger makes active grants and duplicate suppression independently of the observer result, including after restart.
 - **Pydantic Variant Validation:** `Charge` strictly validates required variant fields and rejects negative tokens or incomplete settled charges.
 - **Authentic Mutation Classifier:** `scripts/verified_kernel/mutate.py` requires clean exit code 1 with explicit type-checker mismatch markers (`expected` / `observed`), strictly rejecting compiler crashes, syntax errors, or unannotated import errors.
 
@@ -229,15 +237,14 @@ The runtime architecture maintains separation between the purely functional veri
 The migration strictly enforces zero operational risk during rollout.
 
 ### Default Mode: `SHADOW`
-- Legacy `DiagnosticLedger` acts as the authoritative source of truth.
+- The corrected, durable Python attempt ledger acts as the authoritative source of truth.
 - `VerifiedLifecycleOwner` runs shadow transitions on the Bend core in parallel.
-- Discrepancies between legacy counters and verified projections are logged or audited without interrupting execution.
-- No behavioral changes or exceptions are introduced to existing caller workflows.
+- Discrepancies between Python transitions and verified projections are logged without changing active grants, settlement, or replay decisions.
 
 ### Opt-In Mode: `AUTHORITATIVE`
 - Enabled via `config.lifecycle_mode = LifecycleMode.AUTHORITATIVE`.
 - The verified Bend kernel serves as the sole source of truth.
-- State faults trigger `ConflictFault` / `RuntimeError`.
+- State conflicts return `ConflictFault` and retain the conflicting evidence.
 - Budget overruns trigger `BudgetExhausted`.
 - Transitions are committed atomically to the store journal (`verified.lifecycle_updated`).
 
@@ -248,14 +255,19 @@ The migration strictly enforces zero operational risk during rollout.
 Existing ProtocolLab components rely on journal event kinds and the `DiagnosticLedgerState` schema. `VerifiedLifecycleOwner` preserves both:
 1. **Journal Events Preserved:** `llm.requested`, `llm.input_delivered`, `llm.completed`, `diagnostic.admission_attempted`, `diagnostic.call_reserved`, `diagnostic.call_completed`, etc.
 2. **State Projection:** `owner.state` dynamically yields an immutable, validated `DiagnosticLedgerState` with exact stage breakdown.
-3. **Automated Test Results:**
-   - `pytest tests/verified/`: **53 / 53 passed** (11 mutations, 16 reference traces, 26 boundary hardening tests).
-   - `pytest tests/test_negative_cases.py tests/test_actor_diagnostic.py tests/test_budget_per_request.py tests/test_diagnostic_budget_ledger.py tests/test_diagnostic_modes_and_pipeline.py tests/test_actor_and_experiments.py`: **58 / 58 passed**.
-   - Total regression test pass rate: **100%**.
+3. **Automated Test Results:** The current proof, mutation, verified-boundary, and full Python-suite results are recorded from the same source tree in the validation section below; counts must be refreshed whenever tests or proof terms change.
 
 ---
 
 ## 8. Trust Boundary & Production Rollout Plan
+
+### Validation Snapshot (2026-09-20)
+
+- `bend verified/lifecycle/PROOF.bend`: **passed**, `All terms check.`
+- `pytest -q tests/verified/test_law_mutations.py`: **15 passed** (14 semantic mutations plus the source-manifest binding check).
+- `pytest -q`: **282 passed in 1115.29s**. This run used the production Store, executable Bend bridge, loopback response path, and isolation tests; external model work remained deterministic/fake.
+- `ruff check protocollab scripts tests/verified`: **passed**.
+- `git diff --check main`: **passed**.
 
 ### Formal Demarcation
 - **Proved by Bend Core:**

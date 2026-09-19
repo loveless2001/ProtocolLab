@@ -1,15 +1,15 @@
 # ProtocolLab — Verified Request Lifecycle & Accounting Semantics
 
-**Version:** 1.0.0-draft  
-**Status:** Frozen Baseline (Commit B)  
-**Verification Target:** Pure Bend Kernel (`verified/lifecycle/`)  
+**Version:** 1.0.0-draft
+**Status:** Frozen Baseline (Commit B)
+**Verification Target:** Pure Bend Kernel (`verified/lifecycle/`)
 
 ---
 
 ## 1. State Invariants & Record Identity
 
 ### 1.1 Request Record Identity
-Every request handled by the lifecycle kernel is uniquely identified by `req_id: String`.  
+Every request handled by the lifecycle kernel is uniquely identified by `req_id: String`.
 Its immutable parameters are bound at admission and cannot change:
 - `stage: String`: Diagnostic or evaluation stage (e.g. `"minimal_proposal"`, `"closed_loop"`).
 - `basis_ref: String`: Content digest binding the exact governance and epistemic snapshot under which the proposal was decided.
@@ -81,10 +81,10 @@ If a provider reports actual usage `input + output > r.max_input + r.max_output`
 
 ## 3. Duplication, Replay & Conflicts
 
-1. **Idempotence of Duplicate Receipts:**  
+1. **Idempotence of Duplicate Receipts:**
    If an `EvSettleUsage` arrives for an already settled request with matching token usage and receipt hash, the kernel returns `DuplicateNoop{}`. State and totals are unchanged.
-2. **Conflicting Receipts:**  
+2. **Conflicting Receipts:**
    If a receipt arrives for an existing request with mismatched token usage or stage parameters, the kernel returns `ConflictFault{}` and latches a fault state, halting automated processing for that request and run.
-3. **Deterministic Replay:**  
+3. **Deterministic Replay:**
    Folding an initial state over any event trace $E_1 ++ E_2$ is identical to folding over $E_1$ and then folding the resulting state over $E_2$:
    `fold(fold(S, E1), E2) == fold(S, E1 ++ E2)`.

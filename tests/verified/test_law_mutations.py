@@ -1,5 +1,7 @@
-"""Test that all 11 semantic mutations to Kernel.bend are caught by machine-checked proofs."""
+"""Test that every registered semantic mutation is caught by the proof gate."""
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,16 @@ pytestmark = pytest.mark.skipif(
 )
 
 KERNEL_DIR = Path(__file__).resolve().parent.parent.parent / "verified" / "lifecycle"
+
+
+def test_proof_manifest_matches_checked_sources():
+    manifest = json.loads((KERNEL_DIR / "proof_manifest.json").read_text())
+    for filename, expected in manifest["files"].items():
+        payload = (KERNEL_DIR / filename).read_bytes()
+        assert len(payload) == expected["bytes"]
+        assert hashlib.sha256(payload).hexdigest() == expected["sha256"]
+    assert "LAW-VALIDATION-ACCOUNTING-INVARIANCE" in manifest["laws"]
+    assert "LAW-VALIDATION-NEVER-EMITS-PERMIT" in manifest["laws"]
 
 
 @pytest.mark.parametrize("mutation_name", list(MUTATIONS.keys()))
