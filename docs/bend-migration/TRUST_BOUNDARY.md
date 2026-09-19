@@ -34,6 +34,7 @@ The following aspects remain strictly outside the mathematical proof and depend 
 | **Cryptographic Authenticity** | Signatures, hashes, and Ed25519 identity checks are performed in Python via `cryptography`. The kernel compares hash strings by equality; it does not execute cryptographic primitives. |
 | **Compiler & Runtime Equivalence** | The proof checks the Bend high-level definitions. Discrepancies between the Bend type checker, the C/JS code generation backends, or the Node/Bun JavaScript engines remain part of the trusted computing base. |
 | **Task Progress & Semantic Utility** | Successfully accounting for a model call does not prove that the model's output was helpful, intelligent, or compliant with high-level user intentions. |
+| **Phase 2 Wall Clock & Store Inventory** | The 14-day shadow gate trusts the operational host's UTC clock and the operator's inventory of in-scope production owner stores. Each listed store is journal-verified, but the repository cannot prove that an omitted store or workload does not exist. |
 
 ---
 
@@ -45,3 +46,8 @@ The following aspects remain strictly outside the mathematical proof and depend 
    Any reporting on this system must state:
    *"The named lifecycle and accounting laws check for this Bend implementation under the stated input and toolchain assumptions; integration tests cover the persistence and transport boundaries."*
    Under no circumstances shall ProtocolLab or any report claim that "the entire agent is formally verified".
+3. **Shadow Rollout Claim:**
+   Phase 2 may be called complete only when every in-scope owner store produces a
+   `PASS` report under `SHADOW_MONITORING.md`. Process-log absence, a partial
+   window, or a report with no observed lifecycle comparisons is not evidence of
+   zero divergence.

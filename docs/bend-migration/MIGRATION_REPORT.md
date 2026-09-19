@@ -265,7 +265,7 @@ Existing ProtocolLab components rely on journal event kinds and the `DiagnosticL
 
 - `bend verified/lifecycle/PROOF.bend`: **passed**, `All terms check.`
 - `pytest -q tests/verified/test_law_mutations.py`: **15 passed** (14 semantic mutations plus the source-manifest binding check).
-- `pytest -q`: **282 passed in 1115.29s**. This run used the production Store, executable Bend bridge, loopback response path, and isolation tests; external model work remained deterministic/fake.
+- `pytest -q`: **290 passed in 1099.54s**. This run used the production Store, executable Bend bridge, loopback response path, isolation tests, and durable shadow-monitoring gates; external model work remained deterministic/fake.
 - `ruff check protocollab scripts tests/verified`: **passed**.
 - `git diff --check main`: **passed**.
 
@@ -281,7 +281,7 @@ Existing ProtocolLab components rely on journal event kinds and the `DiagnosticL
   - Bun / JavaScript runtime compiler equivalence.
 
 ### Production Rollout Roadmap
-1. **Phase 1 (Active):** Merge `experiment/bend-lifecycle-kernel` with `SHADOW` mode enabled by default.
-2. **Phase 2:** Monitor production shadow audit logs for 14 days to confirm zero divergence on real workloads.
+1. **Phase 1 (Complete):** PR #2 merged the lifecycle kernel to `main` with `SHADOW` mode enabled by default; branch, pull-request, and post-merge acceptance runs passed.
+2. **Phase 2 (Ready to Start):** Use the durable comparison records and `protocollab shadow-monitor` gate described in `SHADOW_MONITORING.md` on every in-scope production owner store. Fourteen elapsed days, at least one comparison, zero divergence, zero pending observations, and a valid journal are required for `PASS`.
 3. **Phase 3:** Enable `AUTHORITATIVE` mode on canary staging suites.
 4. **Phase 4:** Transition production default to `AUTHORITATIVE` and retire legacy mutable counters.
