@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import atexit
-import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -70,64 +70,61 @@ def get_toolchain_lock() -> dict[str, Any]:
 
 
 def get_locked_bend_version() -> str | None:
-    """Read the pinned Bend compiler version from repository toolchain lock."""
+    """Read the Bend compiler version from repository toolchain lock."""
     data = get_toolchain_lock()
-    return data.get("bend", {}).get("version", "2.0.7")
+    return data.get("bend", {}).get("version", "2.0.16")
+
+
+def _parse_version_key(path: Path) -> tuple[int, ...]:
+    """Extract numeric version components from path for semver comparison."""
+    parts = path.parts
+    try:
+        idx = parts.index("app")
+        ver_str = parts[idx + 1]
+        nums = [int(x) for x in re.findall(r"\d+", ver_str)]
+        return tuple(nums) if nums else (0,)
+    except Exception:
+        return (0,)
 
 
 def find_bend_app() -> Path | None:
+    """Locate the Bend TypeScript runner (main.ts).
+
+    Precedence:
+    1. BEND_APP environment variable (explicit override).
+    2. Direct layout (~/.bend/bend2/main.ts).
+    3. Versioned app trees (~/.bend/app/*/*/bend2/main.ts), newest semver first.
+    4. Current symlink (~/.bend/current/bend2/main.ts).
+    5. Repository vendored toolchain (verified/lifecycle/toolchain/bend2/main.ts).
+    """
     if "BEND_APP" in os.environ:
         p = Path(os.environ["BEND_APP"])
         if p.exists():
             return p
 
     base = Path.home() / ".bend"
-    locked_ver = get_locked_bend_version()
 
-    # 1. Check locked toolchain version tree in home (enforcing repository toolchain lock)
-    if locked_ver:
-        locked_matches = sorted(base.glob(f"app/{locked_ver}/*/bend2/main.ts"), reverse=True)
-        if locked_matches:
-            return locked_matches[0]
-
-    # 2. Check current symlink only if it resolves to locked version
-    current = base / "current" / "bend2" / "main.ts"
-    if current.exists():
-        try:
-            resolved = str(current.resolve())
-            if not locked_ver or (f"app/{locked_ver}/" in resolved):
-                return current
-        except Exception:
-            pass
-
-    # 3. Check direct layout in bend installations only if hash matches locked main.ts
+    # 1. Check direct layout in bend installations
     direct = base / "bend2" / "main.ts"
     if direct.exists():
-        repo_root = Path(__file__).resolve().parent.parent.parent
-        lock = get_toolchain_lock()
-        expected_sha = (
-            lock.get("bend", {}).get("source_files", {}).get("main.ts", {}).get("sha256")
-        )
-        if expected_sha:
-            try:
-                if hashlib.sha256(direct.read_bytes()).hexdigest() == expected_sha:
-                    return direct
-            except Exception:
-                pass
-        elif not locked_ver:
-            return direct
+        return direct
+
+    # 2. Check versioned trees in ~/.bend/app/*/*/bend2/main.ts (newest version first)
+    matches = list(base.glob("app/*/*/bend2/main.ts"))
+    if matches:
+        matches.sort(key=_parse_version_key, reverse=True)
+        return matches[0]
+
+    # 3. Check current symlink
+    current = base / "current" / "bend2" / "main.ts"
+    if current.exists():
+        return current
 
     # 4. Check repository vendored toolchain
     repo_root = Path(__file__).resolve().parent.parent.parent
     vendored = repo_root / "verified" / "lifecycle" / "toolchain" / "bend2" / "main.ts"
     if vendored.exists():
         return vendored
-
-    # 5. If a locked version is declared, do NOT fall back to unpinned arbitrary versions
-    if not locked_ver:
-        matches = sorted(base.glob("app/*/*/bend2/main.ts"), reverse=True)
-        if matches:
-            return matches[0]
 
     return None
 

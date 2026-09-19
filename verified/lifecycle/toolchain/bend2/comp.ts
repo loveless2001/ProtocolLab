@@ -180,11 +180,12 @@ const OPERATIONS: Record<string, Intr> = Object.setPrototypeOf({
     JS: "(Math.imul($0, $1) >>> 0)",
   },
   u32_div: {
-    C:  "((u32)($1) == 0 ? 0 : U32_BIN($0, /, $1))",
+    C:  "((u32)($1) == 0 ? 0 : (u64)U32_QUO((u32)($0), (u32)($1)))",
     JS: "($1 === 0 ? 0 : ($0 / $1) >>> 0)",
   },
   u32_mod: {
-    C:  "((u32)($1) == 0 ? $0 : U32_BIN($0, %, $1))",
+    C:  "((u32)($1) == 0 ? $0 : U32_BIN($0, -,"
+      + " U32_QUO((u32)($0), (u32)($1)) * $1))",
     JS: "($1 === 0 ? $0 : $0 % $1)",
   },
   ...tpl_ops("u32_", "inc:+ shl:<< shr:>>:>>>", "U32_BIN($0, $o, 1)",
@@ -416,6 +417,11 @@ ${SHIMS}
 #endif
 
 #define U32_BIN(a, o, b) ((u64)((u32)(a) o (u32)(b)))
+
+// Metal folds a constant dividend within 128 of 2^32 through an f32: divide
+// its half, then fix the odd bit.
+#define U32_QUO(a, b) \
+  ((a) / 2 / (b) * 2 + ((a) - (a) / 2 / (b) * 2 * (b) >= (b)))
 
 INLINE f32 f32_unbox(u64 x) {
   union { u32 u; f32 f; } p = { (u32)x };
@@ -1222,7 +1228,7 @@ function show_main(book: Bend.Book): Show | null {
   const node = (T: HTerm, lay: Lay): number => {
     const t = ty_wnf(book, T) as HTerm;
     const box = lay_box(lay);
-    const key = String(box) + Bend.term_show(Bend.term_lower(t));
+    const key = String(box) + Bend.term_key(Bend.term_lower(t));
     const got = ids.get(key);
     if (got !== undefined) {
       return got;
@@ -2763,12 +2769,12 @@ function compile_tables(fl: File, entries: Seg[]): string[] {
     defs.push(`CONSTV u8 ${nm}[] = { ${vals.join(", ")} };`);
   };
   table("FID_ARITY_T", entries.map((s) => s.params.length));
-  // A segment may fork when it, or one it reaches, does.
-  const forky = new Set(["FID_CLO_APPLY",
-    ...fl.segs.filter((s) => s.fork).map((s) => s.fid)]);
+  // A segment may fork when it, or one it reaches, does; a closure apply
+  // reaches every closure.
+  const forky = new Set(fl.segs.filter((s) => s.fork).map((s) => s.fid));
   for (let n = -1; n !== forky.size;) {
     n = forky.size;
-    for (const s of fl.segs) {
+    for (const s of [...fl.segs, { fid: "FID_CLO_APPLY", refs: fl.clos }]) {
       if (!forky.has(s.fid) && [...s.refs].some((r) => forky.has(r))) {
         forky.add(s.fid);
       }
@@ -4412,12 +4418,13 @@ INLINE u32 monk_step(Env e, Stk stk, Ring rg, u32 put0, bool seq, u32 base,
       if (err_spun(H, &spin)) {
         return 2;
       }
-      if (stride != 0) {
+      if (stride != 0 && fid_nofk((u32)term_aux(r))) {
         ring_push(H, ring_pick(base, stride, cur), r);
         return 2;
       }
-      t   = r;
-      seq = false;
+      t      = r;
+      seq    = false;
+      stride = 0;
       continue;
     }
     task_deal(H, r, base, stride, cur);
@@ -6129,7 +6136,8 @@ function io_sys() {
     const vari = mac && process.arch === "arm64";
     const lib = ffi.dlopen(mac ? "libSystem.dylib" : "libc.so.6",
       Object.fromEntries(("socket:iii>i bind:ipu>i listen:ii>i connect:ipu>i"
-        + " accept:ipp>i send:ipUi>I recv:ipUi>I read:ipU>I sendto:ipUipu>I"
+        + " accept:ipp>i send:ipUi>I recv:ipUi>I read:ipU>I pread:ipUI>I"
+        + " sendto:ipUipu>I"
         + " recvfrom:ipUipp>I close:i>i poll:pui>i setsockopt:iiipu>i"
         + (vari ? " fcntl:iiiiiiiii>i" : " fcntl:iii>i") + " getsockopt:iiipp>i"
         + " strerror:i>c " + err + ":>p").split(" ").map((s) => {
@@ -6163,7 +6171,8 @@ function io_bytes(text) {
 }
 
 function io_text(b, n) {
-  return new TextDecoder().decode(b.subarray(0, n));
+  const dec = new TextDecoder("utf-8", { ignoreBOM: true });
+  return dec.decode(b.subarray(0, n));
 }
 
 function io_addr(host, port) {

@@ -466,22 +466,26 @@ def test_lifecycle_owner_quarantine_crash_gap_closed():
 
 
 def test_find_bend_app_discovers_version_trees(tmp_path, monkeypatch):
-    """Verify that find_bend_app discovers versioned app trees (e.g. 2.0.7, 2.0.5) in reverse order."""
+    """Verify that find_bend_app discovers versioned app trees (e.g. 2.0.16, 2.0.7, 2.0.5) in reverse semver order."""
     from protocollab.verified.bridge import find_bend_app
 
     monkeypatch.delenv("BEND_APP", raising=False)
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
-    app_207 = tmp_path / ".bend" / "app" / "2.0.7" / "pkgA" / "bend2" / "main.ts"
+    app_2016 = tmp_path / ".bend" / "app" / "2.0.16" / "pkgA" / "bend2" / "main.ts"
+    app_2016.parent.mkdir(parents=True, exist_ok=True)
+    app_2016.write_text("// 2.0.16 fixture")
+
+    app_207 = tmp_path / ".bend" / "app" / "2.0.7" / "pkgB" / "bend2" / "main.ts"
     app_207.parent.mkdir(parents=True, exist_ok=True)
     app_207.write_text("// 2.0.7 fixture")
 
-    app_205 = tmp_path / ".bend" / "app" / "2.0.5" / "pkgB" / "bend2" / "main.ts"
+    app_205 = tmp_path / ".bend" / "app" / "2.0.5" / "pkgC" / "bend2" / "main.ts"
     app_205.parent.mkdir(parents=True, exist_ok=True)
     app_205.write_text("// 2.0.5 fixture")
 
     found = find_bend_app()
-    assert found == app_207, f"Expected newest 2.0.7 version, got {found}"
+    assert found == app_2016, f"Expected newest 2.0.16 version, got {found}"
 
 
 def test_decision_adapter_verified_lifecycle_integration():
@@ -564,26 +568,23 @@ def test_decision_adapter_verified_lifecycle_integration():
     assert len(settle_ev["receipt_hash"]) == 64  # SHA-256 hex digest
 
 
-def test_find_bend_app_enforces_toolchain_lock(tmp_path, monkeypatch):
-    """Verify that find_bend_app selects the pinned toolchain lock version (2.0.7)
-
-    even when an unpinned higher version (e.g. 2.0.8) is present in the app tree.
-    """
+def test_find_bend_app_prefers_direct_layout(tmp_path, monkeypatch):
+    """Verify that find_bend_app prefers direct layout (~/.bend/bend2/main.ts) over legacy version trees."""
     from protocollab.verified.bridge import find_bend_app
 
     monkeypatch.delenv("BEND_APP", raising=False)
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
-    app_208 = tmp_path / ".bend" / "app" / "2.0.8" / "fixture" / "bend2" / "main.ts"
-    app_208.parent.mkdir(parents=True, exist_ok=True)
-    app_208.write_text("// 2.0.8 unpinned fixture")
+    direct = tmp_path / ".bend" / "bend2" / "main.ts"
+    direct.parent.mkdir(parents=True, exist_ok=True)
+    direct.write_text("// direct layout fixture")
 
-    app_207 = tmp_path / ".bend" / "app" / "2.0.7" / "fixture" / "bend2" / "main.ts"
-    app_207.parent.mkdir(parents=True, exist_ok=True)
-    app_207.write_text("// 2.0.7 pinned fixture")
+    app_old = tmp_path / ".bend" / "app" / "2.0.7" / "fixture" / "bend2" / "main.ts"
+    app_old.parent.mkdir(parents=True, exist_ok=True)
+    app_old.write_text("// legacy version fixture")
 
     found = find_bend_app()
-    assert found == app_207, f"Expected locked 2.0.7 version, got {found}"
+    assert found == direct, f"Expected direct layout {direct}, got {found}"
 
 
 def test_repeated_prompt_distinct_request_ids():
@@ -1071,58 +1072,44 @@ def test_shadow_timeout_no_divergence():
     assert shadow_usage.failures == 0, f"Shadow kernel must not mark timeout as conclusive failure, got {shadow_usage.failures}"
 
 
-def test_discovery_rejects_unpinned_and_prefers_locked():
-    """Verify that find_bend_app() rejects unpinned versions and prefers locked versions over unverified direct layout."""
+def test_find_bend_app_discovery_flexibility_and_vendored_fallback():
+    """Verify that find_bend_app() dynamically resolves latest versions and falls back to vendored toolchain."""
     import tempfile
     from pathlib import Path
     from unittest.mock import patch
 
     from protocollab.verified.bridge import find_bend_app
 
-    # Scenario 1: locked 2.0.7 + newer 2.0.8 coexist -> must pick 2.0.7
+    # Scenario 1: multiple versions coexist -> picks latest semver version (e.g. 2.0.16 over 2.0.7)
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
-        for p in ["app/2.0.7/pkg/bend2/main.ts", "app/2.0.8/pkg/bend2/main.ts"]:
+        for p in ["app/2.0.7/pkg/bend2/main.ts", "app/2.0.16/pkg/bend2/main.ts"]:
             f = home / ".bend" / p
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text("// placeholder")
         with patch.dict("os.environ", {}, clear=True), patch.object(Path, "home", return_value=home):
             res = find_bend_app()
             assert res is not None
-            assert "2.0.7" in str(res)
+            assert "2.0.16" in str(res), f"Expected latest version 2.0.16, got {res}"
 
-    # Scenario 2: only unpinned 2.0.8 exists -> must return None (reject unpinned version)
+    # Scenario 2: empty home directory -> falls back to repository vendored toolchain
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
-        f = home / ".bend" / "app" / "2.0.8" / "pkg" / "bend2" / "main.ts"
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text("// placeholder")
-        orig_exists = Path.exists
-
-        def fake_exists(p):
-            if "lifecycle/toolchain" in str(p):
-                return False
-            return orig_exists(p)
-
-        with (
-            patch.dict("os.environ", {}, clear=True),
-            patch.object(Path, "home", return_value=home),
-            patch.object(Path, "exists", fake_exists),
-        ):
-            res = find_bend_app()
-            assert res is None, "find_bend_app must NOT accept an unpinned version when lock specifies 2.0.7!"
-
-    # Scenario 3: unverified direct layout + locked 2.0.7 coexist -> must prefer locked 2.0.7
-    with tempfile.TemporaryDirectory() as tmp:
-        home = Path(tmp)
-        for p in ["bend2/main.ts", "app/2.0.7/pkg/bend2/main.ts"]:
-            f = home / ".bend" / p
-            f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_text("// placeholder")
         with patch.dict("os.environ", {}, clear=True), patch.object(Path, "home", return_value=home):
             res = find_bend_app()
             assert res is not None
-            assert "app/2.0.7" in str(res), "find_bend_app must prefer verified locked tree over unverified direct layout!"
+            assert "verified/lifecycle/toolchain/bend2/main.ts" in str(res), f"Expected vendored fallback, got {res}"
+
+    # Scenario 3: BEND_APP env var override takes highest precedence
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        custom_runner = home / "custom" / "main.ts"
+        custom_runner.parent.mkdir(parents=True, exist_ok=True)
+        custom_runner.write_text("// custom runner")
+        with patch.dict("os.environ", {"BEND_APP": str(custom_runner)}), patch.object(Path, "home", return_value=home):
+            res = find_bend_app()
+            assert res == custom_runner, f"Expected BEND_APP override, got {res}"
+
 
 
 

@@ -7,26 +7,26 @@
     "branch": "experiment/bend-lifecycle-kernel"
   },
   "bend": {
-    "version": "2.0.7",
-    "inspected_source_baseline": "0b7e2b11c1054f5d0f4eb955cadb47997ef1115d",
+    "version": "2.0.16",
+    "inspected_source_baseline": "v2.0.16",
     "binary_path": "/home/lenovo/.bend/bin/bend",
-    "binary_sha256": "9feb76828ea448c1388eaab00e193164b507206cdfc8766f3460868d5211e1c8",
+    "binary_sha256": "1c39375c1bf500542d5de373a4658986e090229ff966fa3ebf77065f37265a2b",
     "source_files": {
       "main.ts": {
-        "path": "/home/lenovo/.bend/app/2.0.7/qgAjiA/bend2/main.ts",
-        "sha256": "221053a1116a23e75bb80ae0df1da90c6fb41818d215bef2fec6fdd54bb2b8cc"
+        "path": "verified/lifecycle/toolchain/bend2/main.ts",
+        "sha256": "f722bcd7a56807d356aaa8033c3d6bc151f406d9f75c2146baa5b60fef228d4f"
       },
       "comp.ts": {
-        "path": "/home/lenovo/.bend/app/2.0.7/qgAjiA/bend2/comp.ts",
-        "sha256": "99f24d78e7854830e0a20a6eebc8bf72288c4ec2dc9216fcd79fa61df9bd6cd2"
+        "path": "verified/lifecycle/toolchain/bend2/comp.ts",
+        "sha256": "0939b98d013ab58d82619e35c0d4900b72c9d8e5b478f0e1df7822fe713c9b48"
       },
       "bend.ts": {
-        "path": "/home/lenovo/.bend/app/2.0.7/qgAjiA/bend2/bend.ts",
-        "sha256": "f059be898e1f3b70c71299e39113aab01613a10e743814eaf439b77d5af0954f"
+        "path": "verified/lifecycle/toolchain/bend2/bend.ts",
+        "sha256": "47e1b06e2fa4466bad702f86d8cbce03f40e833a8ba8eaa1e04297fa46dc94a9"
       },
       "base.bend": {
-        "path": "/home/lenovo/.bend/app/2.0.7/qgAjiA/bend2/base.bend",
-        "sha256": "dc0a00754c03715821e67da6ae5273ae2f6df139ee090e0e97251130a8a3f385"
+        "path": "verified/lifecycle/toolchain/bend2/base.bend",
+        "sha256": "e149828ca05581f61d1b06cf2a7d1a744e394d29a4c8e1942e5062ecbf30f5b8"
       }
     }
   },

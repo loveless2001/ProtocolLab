@@ -21,8 +21,8 @@ The verified kernel execution and proof verification environment is pinned via `
 
 | Component | Pinned Version | Execution Role | Verification Status |
 | :--- | :--- | :--- | :--- |
-| **Bend** | `2.0.7` | Type-checker, theorem prover & compiler | `All terms check.` |
-| **Bun** | `1.3.8` | High-performance JS/TS runtime for Bend preloader | Verified functional |
+| **Bend** | `2.0.16` | Type-checker, theorem prover & compiler | `All terms check.` |
+| **Bun** | `1.3.8+` | High-performance JS/TS runtime for Bend preloader | Verified functional |
 | **Node.js** | `v25.5.0` | Alternative JS engine compatibility | Pinned |
 | **Python** | `3.12.3` | Host virtual environment (`.venv`) & pytest runner | Verified functional |
 | **OS / Platform** | `Linux x86_64` | POSIX execution host | Deterministic stdio |
@@ -33,7 +33,7 @@ The verified kernel execution and proof verification environment is pinned via `
 {
   "version": "1.0.0",
   "toolchain": {
-    "bend": "2.0.7",
+    "bend": "2.0.16",
     "bun": "1.3.8",
     "node": "25.5.0"
   },
@@ -187,11 +187,11 @@ The runtime architecture maintains separation between the purely functional veri
 │   compatibility projection)   │     │  - Fast stdin/stdout streaming    │
 └───────────────────────────────┘     └─────────────────┬─────────────────┘
                                                         │
-                                                         ▼
-                                       ┌───────────────────────────────────┐
-                                       │ scripts/verified_kernel/runner.mjs│
-                                       │ (Bun + Bend 2.0.7/2.0.5 Preloader)│
-                                       └─────────────────┬─────────────────┘
+                                                        ▼
+                                      ┌───────────────────────────────────┐
+                                      │ scripts/verified_kernel/runner.mjs│
+                                      │ (Bun + Bend Preloader)            │
+                                      └─────────────────┬─────────────────┘
                                                          │
                                                          ▼
                                        ┌───────────────────────────────────┐
@@ -204,7 +204,7 @@ The runtime architecture maintains separation between the purely functional veri
 ### Measured Performance & Boundary Hardening
 - **Subprocess Startup:** Persistent daemon spawned once per session (~150ms startup).
 - **Transaction Overhead:** Sub-millisecond execution (< 0.8ms per `apply` command over stdio pipe).
-- **Locked Toolchain Enforcement & Vendored Distribution:** `find_bend_app()` strictly enforces the pinned toolchain version (`2.0.7` from `toolchain.lock.json`) over unpinned higher fixtures (e.g. `2.0.8`) and prefers locked version trees over unverified direct layout. The locked Bend 2.0.7 app files (`bend2/`) are vendored directly in `verified/lifecycle/toolchain/bend2/` for deterministic offline execution in CI.
+- **Flexible Toolchain Discovery & Vendored Distribution:** `find_bend_app()` dynamically resolves the Bend runner (`main.ts`) following standard Bend installation paths: explicit `BEND_APP` override, direct layout (`~/.bend/bend2/main.ts`), latest versioned trees (`~/.bend/app/*/*/bend2/main.ts`), current symlink (`~/.bend/current/bend2/main.ts`), and repository vendored fallback (`verified/lifecycle/toolchain/bend2/main.ts`). This allows seamless co-development alongside upstream Bend releases while retaining deterministic offline execution in CI.
 - **Dynamic AST Compatibility:** `runner.mjs` probes constructor namespace prefixes at startup to handle Bend compiler AST changes seamlessly across toolchain versions.
 - **Exact Numeric Representation:** All tokens and counts mapped to `BigInt` across JSON wire format, guarded by `MAX_SAFE_INT = 9_007_199_254_740_991` to prevent JS float precision loss.
 - **Duplicate Request Redispatch Prevention:** `DecisionAdapter.decide()` checks reserve and dispatch verdicts from the ledger. If `DuplicateNoop` is returned on an explicit request ID, duplicate physical execution is suppressed (`validation_outcome="DUPLICATE_REQUEST"`), preventing unmetered backend calls.
@@ -217,7 +217,7 @@ The runtime architecture maintains separation between the purely functional veri
 - **Cryptographic Receipt Binding:** `receipt_hash` binds the full SHA-256 hash of the model's raw response alongside token counts, guaranteeing unique receipts across different model generations.
 - **Timeout Reservation Preservation:** `TimeoutError` during inference invokes `record_timeout` (`EvTimeoutUnknown`), maintaining held reservations and setting transport to `OutcomeUnknown` rather than releasing charges as `FailureConclusive`.
 - **Candidate Score Settle-Before-Validation:** `candidate_score` mode settles confirmed token usage on the ledger immediately upon return from `port.score_candidates`, ensuring that subsequent candidate vector validation failures result in fallback proposals without forfeiting physical token billing.
-- **Automated CI Toolchain Execution:** `.github/workflows/ci.yml` installs pinned Bun 1.3.8 and Bend compiler, sets up the vendored Bend 2.0.7 preloader, verifies `PROOF.bend`, and executes the verified test suite directly in CI with zero skipped tests.
+- **Automated CI Toolchain Execution:** `.github/workflows/ci.yml` installs Bun and the Bend compiler, provisions the Bend runner, verifies `PROOF.bend`, and executes the verified test suite directly in CI with zero skipped tests.
 - **Fail-Safe Shadow Execution:** All shadow-mode bridge calls (including initialization and transitions) are wrapped in non-propagating exception handlers with warning logs, ensuring bridge errors never fail production callers.
 - **Pydantic Variant Validation:** `Charge` strictly validates required variant fields and rejects negative tokens or incomplete settled charges.
 - **Authentic Mutation Classifier:** `scripts/verified_kernel/mutate.py` requires clean exit code 1 with explicit type-checker mismatch markers (`expected` / `observed`), strictly rejecting compiler crashes, syntax errors, or unannotated import errors.
