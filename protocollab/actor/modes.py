@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import math
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -132,6 +133,7 @@ class DecisionAdapter:
         seed: int,
         ledger: Any = None,
         stage: str = "closed_loop",
+        req_id: str | None = None,
     ) -> DecisionOutcome:
         basis_ref = packet.get("decision_basis_ref", "")
         mode = self.config.decision_mode
@@ -145,7 +147,11 @@ class DecisionAdapter:
             ledger.record_admission_attempt(stage)
 
         reservation = None
-        req_id = None
+        assigned_req_id = req_id
+        prev_input = getattr(port, "input_tokens", 0)
+        prev_output = getattr(port, "output_tokens", 0)
+        sc_input = 0
+        sc_output = 0
         try:
             # 3. Unified input composition and admission
             unformatted_prompt, formatted_prompt, evidence = compose_and_admit_input(
@@ -157,7 +163,9 @@ class DecisionAdapter:
             )
 
             # 4. Token reservation & dispatch
-            req_id = f"req_{digest(formatted_prompt)[:16]}"
+            if assigned_req_id is None:
+                assigned_req_id = f"req_{digest(formatted_prompt)[:12]}_{uuid.uuid4().hex[:8]}"
+            req_id = assigned_req_id
             max_input = self.config.model_port_config.max_input_tokens
             max_output = self.config.model_port_config.max_output_tokens
             if ledger is not None:
@@ -236,8 +244,11 @@ class DecisionAdapter:
                     **score_kwargs,
                 )
 
+                sc_input = result.get("input_tokens", 0) if isinstance(result, dict) else 0
+                sc_output = result.get("output_tokens", 0) if isinstance(result, dict) else 0
+
                 # Strict Identity and fingerprint validation (§4)
-                if "model_id" not in result:
+                if not isinstance(result, dict) or "model_id" not in result:
                     raise ValueError("MODEL_IDENTIFIER_MISSING: result must include model_id")
                 if result["model_id"] != port.config.model_id:
                     raise ValueError(
@@ -286,8 +297,6 @@ class DecisionAdapter:
 
                 best = max(evaluations, key=lambda e: (e["score"], -e["index"]))
                 winning_json = best["candidate"]
-                sc_input = result.get("input_tokens", 0)
-                sc_output = result.get("output_tokens", 0)
                 compute_meta = result.get("compute", {
                     "logical_decisions": 1,
                     "candidate_evaluations": len(self.config.candidate_registry),
@@ -311,14 +320,52 @@ class DecisionAdapter:
 
         except Exception as exc:
             # Inference stage failed (admission, budget, transport, or candidate validation)
+            delta_input = (getattr(port, "input_tokens", 0) - prev_input) if hasattr(port, "input_tokens") else 0
+            delta_output = (getattr(port, "output_tokens", 0) - prev_output) if hasattr(port, "output_tokens") else 0
+            if sc_input > 0:
+                delta_input = sc_input
+            if sc_output > 0:
+                delta_output = sc_output
+
             if ledger is not None and reservation is not None:
-                ev_hash = digest(f"{req_id or 'unknown'}:FAILED:{type(exc).__name__}")
-                ledger.record_failed(
-                    stage,
-                    reservation,
-                    req_id=req_id,
-                    evidence_hash=ev_hash,
-                )
+                if delta_input > 0 or delta_output > 0:
+                    # Model inference executed and consumed physical tokens before failure occurred.
+                    # Settle consumed usage on ledger so physical consumption is not unbilled.
+                    receipt_hash = digest(
+                        f"{req_id}:{delta_input}:{delta_output}:FAILURE:{type(exc).__name__}:{exc}"
+                    )
+                    ledger.record_completed(
+                        stage,
+                        delta_input,
+                        delta_output,
+                        reservation,
+                        req_id=req_id,
+                        receipt_hash=receipt_hash,
+                    )
+                elif isinstance(exc, TimeoutError):
+                    if hasattr(ledger, "record_timeout"):
+                        ledger.record_timeout(
+                            stage,
+                            reservation,
+                            req_id=req_id,
+                            reason=f"timeout:{type(exc).__name__}:{exc}",
+                        )
+                    else:
+                        ev_hash = digest(f"{req_id or 'unknown'}:TIMEOUT:{type(exc).__name__}:{exc}")
+                        ledger.record_failed(
+                            stage,
+                            reservation,
+                            req_id=req_id,
+                            evidence_hash=ev_hash,
+                        )
+                else:
+                    ev_hash = digest(f"{req_id or 'unknown'}:FAILED:{type(exc).__name__}:{exc}")
+                    ledger.record_failed(
+                        stage,
+                        reservation,
+                        req_id=req_id,
+                        evidence_hash=ev_hash,
+                    )
 
             from protocollab.learning import BudgetExhausted
             error_meta: dict[str, Any] = {}
@@ -332,7 +379,7 @@ class DecisionAdapter:
                 raise
             else:
                 val_outcome = "INFERENCE_FAILED"
-                error_meta = {"error_type": type(exc).__name__}
+                error_meta = {"error_type": type(exc).__name__, "reason": str(exc)}
 
             return DecisionOutcome(
                 mode=mode,
@@ -343,7 +390,7 @@ class DecisionAdapter:
                 extraction_policy="fallback",
                 validation_outcome=val_outcome,
                 is_fallback=True,
-                total_tokens_evaluated=0,
+                total_tokens_evaluated=delta_input + delta_output,
                 decision_basis_ref=basis_ref,
                 claim_refs=claim_refs,
                 backend_meta=error_meta,
@@ -351,8 +398,11 @@ class DecisionAdapter:
 
         # 6. Settle inference usage immediately on ledger (§2)
         if ledger is not None:
+            raw_val = inf_res.raw_response
+            resp_str = raw_val if isinstance(raw_val, str) else canonical(raw_val).decode("utf-8")
+            resp_hash = digest(resp_str)
             receipt_hash = digest(
-                f"{req_id}:{inf_res.input_tokens}:{inf_res.output_tokens}:{inf_res.completed}"
+                f"{req_id}:{inf_res.input_tokens}:{inf_res.output_tokens}:{resp_hash}"
             )
             ledger.record_completed(
                 stage,

@@ -539,3 +539,302 @@ def test_decision_adapter_verified_lifecycle_integration():
     assert len(settle_ev["receipt_hash"]) == 64  # SHA-256 hex digest
 
 
+def test_find_bend_app_enforces_toolchain_lock(tmp_path, monkeypatch):
+    """Verify that find_bend_app selects the pinned toolchain lock version (2.0.7)
+
+    even when an unpinned higher version (e.g. 2.0.8) is present in the app tree.
+    """
+    from protocollab.verified.bridge import find_bend_app
+
+    monkeypatch.delenv("BEND_APP", raising=False)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+    app_208 = tmp_path / ".bend" / "app" / "2.0.8" / "fixture" / "bend2" / "main.ts"
+    app_208.parent.mkdir(parents=True, exist_ok=True)
+    app_208.write_text("// 2.0.8 unpinned fixture")
+
+    app_207 = tmp_path / ".bend" / "app" / "2.0.7" / "fixture" / "bend2" / "main.ts"
+    app_207.parent.mkdir(parents=True, exist_ok=True)
+    app_207.write_text("// 2.0.7 pinned fixture")
+
+    found = find_bend_app()
+    assert found == app_207, f"Expected locked 2.0.7 version, got {found}"
+
+
+def test_repeated_prompt_distinct_request_ids():
+    """Verify that multiple decide calls on the same packet generate distinct request IDs
+
+    so that repeated port calls are not falsely coalesced or suppressed as duplicate noops.
+    """
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-repeat",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="free_json",
+        renderer="demarcated",
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class CountingPort:
+        def __init__(self):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.calls = 0
+            self.input_tokens = 0
+            self.output_tokens = 0
+
+        def generate(self, packet, seed, prompt_override=None):
+            self.calls += 1
+            self.input_tokens += 20
+            self.output_tokens += 10
+            return '{"kind": "WAIT"}' if self.calls % 2 else '{"kind": "FINISH"}'
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=10, max_tokens=2000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=2000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="repeat_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+
+    packet = {
+        "schema_version": "0.1",
+        "public_alphabet": ["TICK"],
+        "decision_basis_ref": "basis",
+        "task": {"id": 1},
+    }
+    port = CountingPort()
+    outcomes = [adapter.decide(port, packet, seed=7, ledger=owner, stage="stage1") for _ in range(5)]
+
+    reserve_events = [e for e in bridge.events if e["kind"] == "Reserve"]
+    settle_events = [e for e in bridge.events if e["kind"] == "SettleUsage"]
+
+    req_ids = [e["req_id"] for e in reserve_events]
+    assert len(set(req_ids)) == 5, f"Expected 5 distinct req_ids for 5 calls, got {set(req_ids)}"
+    assert len(settle_events) == 5
+    assert len(outcomes) == 5
+
+
+def test_receipt_hash_binds_model_output():
+    """Verify that different raw model responses with identical token counts produce different receipt hashes."""
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-receipt",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="free_json",
+        renderer="demarcated",
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class AlternatingPort:
+        def __init__(self):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.calls = 0
+            self.input_tokens = 0
+            self.output_tokens = 0
+
+        def generate(self, packet, seed, prompt_override=None):
+            self.calls += 1
+            self.input_tokens += 20
+            self.output_tokens += 10
+            return '{"kind": "WAIT"}' if self.calls == 1 else '{"kind": "FINISH"}'
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=10, max_tokens=2000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=2000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="receipt_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+
+    packet = {
+        "schema_version": "0.1",
+        "public_alphabet": ["TICK"],
+        "decision_basis_ref": "basis",
+        "task": {},
+    }
+    port = AlternatingPort()
+    adapter.decide(port, packet, seed=7, ledger=owner, stage="stage1")
+    adapter.decide(port, packet, seed=7, ledger=owner, stage="stage1")
+
+    settle_events = [e for e in bridge.events if e["kind"] == "SettleUsage"]
+    assert len(settle_events) == 2
+    assert settle_events[0]["receipt_hash"] != settle_events[1]["receipt_hash"], (
+        "Receipt hashes must differ when raw model responses differ!"
+    )
+
+
+def test_timeout_triggers_record_timeout_preserves_reservation():
+    """Verify that TimeoutError triggers record_timeout, preserving the pending reservation."""
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-timeout",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="free_json",
+        renderer="demarcated",
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class TimeoutPort:
+        def __init__(self):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.input_tokens = 0
+            self.output_tokens = 0
+
+        def generate(self, packet, seed, prompt_override=None):
+            raise TimeoutError("TIMED_OUT_AFTER_PROVIDER_RECEIVED_REQUEST")
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=10, max_tokens=2000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=2000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="timeout_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+
+    packet = {
+        "schema_version": "0.1",
+        "public_alphabet": ["TICK"],
+        "decision_basis_ref": "basis",
+        "task": {},
+    }
+    outcome = adapter.decide(TimeoutPort(), packet, seed=7, ledger=owner, stage="stage1")
+    assert outcome.validation_outcome in ("TIMEOUT", "INFERENCE_FAILED")
+    assert outcome.is_fallback
+
+    # Must emit TimeoutUnknown to bridge, NOT FailureConclusive!
+    timeout_ev = next((e for e in bridge.events if e["kind"] == "TimeoutUnknown"), None)
+    failure_ev = next((e for e in bridge.events if e["kind"] == "FailureConclusive"), None)
+    assert timeout_ev is not None, "TimeoutError must emit TimeoutUnknown event!"
+    assert failure_ev is None, "TimeoutError must NOT emit FailureConclusive!"
+    assert "TIMED_OUT_AFTER_PROVIDER_RECEIVED_REQUEST" in timeout_ev["reason"]
+
+
+def test_candidate_score_settles_tokens_before_candidate_validation():
+    """Verify that when score_candidates consumes tokens but evaluations are invalid,
+
+    the consumed tokens are settled on the ledger rather than released as unspent.
+    """
+    from protocollab.actor import ModelPortConfig
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_cfg = ModelPortConfig(
+        backend="api",
+        model_id="test-cand",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=500,
+    )
+    diag_cfg = DiagnosticConfig(
+        model_port_config=port_cfg,
+        decision_mode="candidate_score",
+        candidate_registry=['{"kind":"WAIT"}', '{"kind":"FINISH"}'],
+    )
+    adapter = DecisionAdapter(diag_cfg)
+
+    class MalformedScorePort:
+        def __init__(self):
+            self.config = port_cfg
+            self.phase = "suffix"
+            self.store = None
+            self.input_tokens = 0
+            self.output_tokens = 0
+
+        def score_candidates(self, prompt, candidates, seed=0, claims=None):
+            # Consumes 120 input and 25 output tokens, but returns empty evaluations
+            return {
+                "model_id": "test-cand",
+                "input_tokens": 120,
+                "output_tokens": 25,
+                "evaluations": [],  # Mismatch: registry has 2 candidates
+            }
+
+    alloc = DiagnosticBudgetAllocation(
+        stages={"stage1": StageBudgetLimits(max_calls=10, max_tokens=2000)},
+        aggregate_max_calls=10,
+        aggregate_max_tokens=2000,
+    )
+    bridge = FaultyBridge()
+    owner = VerifiedLifecycleOwner(
+        store=DummyStore(),
+        run_id="cand_score_run",
+        allocation=alloc,
+        config_hash="cfg",
+        mode=LifecycleMode.AUTHORITATIVE,
+        bridge=bridge,
+    )
+
+    packet = {
+        "schema_version": "0.1",
+        "public_alphabet": ["TICK"],
+        "decision_basis_ref": "basis",
+        "task": {},
+    }
+    outcome = adapter.decide(MalformedScorePort(), packet, seed=7, ledger=owner, stage="stage1")
+    assert outcome.validation_outcome == "INFERENCE_FAILED"
+    assert outcome.is_fallback
+
+    # Verify that usage was SETTLED on the bridge, not released!
+    settle_ev = next((e for e in bridge.events if e["kind"] == "SettleUsage"), None)
+    failure_ev = next((e for e in bridge.events if e["kind"] == "FailureConclusive"), None)
+    assert settle_ev is not None, "Inference tokens must be settled on ledger even if candidate vector is malformed!"
+    assert settle_ev["input_tokens"] == 120
+    assert settle_ev["output_tokens"] == 25
+    assert failure_ev is None, "Executed model call must not be released as FailureConclusive!"
+
+
+

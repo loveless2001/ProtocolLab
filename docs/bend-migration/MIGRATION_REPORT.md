@@ -204,12 +204,17 @@ The runtime architecture maintains separation between the purely functional veri
 ### Measured Performance & Boundary Hardening
 - **Subprocess Startup:** Persistent daemon spawned once per session (~150ms startup).
 - **Transaction Overhead:** Sub-millisecond execution (< 0.8ms per `apply` command over stdio pipe).
-- **Multi-Version Toolchain Discovery:** `find_bend_app()` dynamically resolves the current compiler installation across toolchain locks (prioritizing Bend 2.0.7 descending to 2.0.5) and dynamic ADT probe detection in `runner.mjs` handles compiler AST variations across versions.
+- **Locked Toolchain Enforcement:** `find_bend_app()` strictly enforces the pinned toolchain version (`2.0.7` from `toolchain.lock.json`) over unpinned higher fixtures (e.g. `2.0.8`) and supports both standard (`~/.bend/bend2/main.ts`) and versioned tree layouts.
+- **Dynamic AST Compatibility:** `runner.mjs` probes constructor namespace prefixes at startup to handle Bend compiler AST changes seamlessly across toolchain versions.
 - **Exact Numeric Representation:** All tokens and counts mapped to `BigInt` across JSON wire format, guarded by `MAX_SAFE_INT = 9_007_199_254_740_991` to prevent JS float precision loss.
 - **Stage-Isolated Request Tracking & Receipt Mapping:** `VerifiedLifecycleOwner` maintains FIFO request queues per stage (`_stage_active_req_ids`), maps receipt hashes to settled requests (`_receipt_to_req_id`), and tracks completed requests (`_stage_last_completed`). This prevents duplicate or replayed completions from consuming pending requests in the active queue. `_reconstruct_routing()` automatically reconstructs all routing mappings upon process restart.
 - **Multi-Owner Atomic Concurrency & DB Transactions:** `_apply_bridge` serializes operations across database connections using `_store_transaction()` (`BEGIN IMMEDIATE ... COMMIT`), acquires `store.lock` in-memory, refreshes the latest state snapshot via `_refresh_state()`, applies the transition, and commits atomically.
 - **Atomic Quarantine Evidence Persistence:** Conflicting usage settlements after release trigger `CONFLICT_FAULT`. The audit evidence (`receipt_hash`, token metrics, fault reason) is persisted to `verified_quarantine_records` *before* committing the latched fault state to the primary ledger. If writing quarantine evidence fails, the faulted ledger is not committed, preventing unprovable latched fault deadlocks upon recovery.
-- **End-to-End Decision Provenance:** `DecisionAdapter` generates authentic cryptographic request IDs (`req_{digest(prompt)[:16]}`), passes real decision basis references, exact input/output caps, and computes deterministic SHA-256 receipt hashes over generated output, eliminating fabricated synthetic defaults in production.
+- **Disambiguated Request Provenance:** `DecisionAdapter` generates distinct request IDs incorporating the prompt hash and a unique invocation suffix (`req_{digest(prompt)[:12]}_{uuid.uuid4().hex[:8]}`), ensuring repeated invocations with identical prompt packets are properly isolated and tracked without false `DuplicateNoop` suppression.
+- **Cryptographic Receipt Binding:** `receipt_hash` binds the full SHA-256 hash of the model's raw response alongside token counts, guaranteeing unique receipts across different model generations.
+- **Timeout Reservation Preservation:** `TimeoutError` during inference invokes `record_timeout` (`EvTimeoutUnknown`), maintaining held reservations and setting transport to `OutcomeUnknown` rather than releasing charges as `FailureConclusive`.
+- **Candidate Score Settle-Before-Validation:** `candidate_score` mode settles confirmed token usage on the ledger immediately upon return from `port.score_candidates`, ensuring that subsequent candidate vector validation failures result in fallback proposals without forfeiting physical token billing.
+- **Automated CI Toolchain Execution:** `.github/workflows/ci.yml` installs the Bun runtime and Bend compiler, verifies `PROOF.bend`, and executes the verified test suite directly in CI with zero skipped tests.
 - **Fail-Safe Shadow Execution:** All shadow-mode bridge calls (including initialization and transitions) are wrapped in non-propagating exception handlers with warning logs, ensuring bridge errors never fail production callers.
 - **Pydantic Variant Validation:** `Charge` strictly validates required variant fields and rejects negative tokens or incomplete settled charges.
 - **Authentic Mutation Classifier:** `scripts/verified_kernel/mutate.py` requires clean exit code 1 with explicit type-checker mismatch markers (`expected` / `observed`), strictly rejecting compiler crashes, syntax errors, or unannotated import errors.
@@ -241,8 +246,8 @@ Existing ProtocolLab components rely on journal event kinds and the `DiagnosticL
 1. **Journal Events Preserved:** `llm.requested`, `llm.input_delivered`, `llm.completed`, `diagnostic.admission_attempted`, `diagnostic.call_reserved`, `diagnostic.call_completed`, etc.
 2. **State Projection:** `owner.state` dynamically yields an immutable, validated `DiagnosticLedgerState` with exact stage breakdown.
 3. **Automated Test Results:**
-   - `pytest tests/verified/`: **44 / 44 passed** (11 mutations, 16 reference traces, 17 boundary hardening tests).
-   - `pytest tests/test_negative_cases.py tests/test_actor_diagnostic.py tests/test_budget_per_request.py tests/test_diagnostic_budget_ledger.py`: **43 / 43 passed**.
+   - `pytest tests/verified/`: **49 / 49 passed** (11 mutations, 16 reference traces, 22 boundary hardening tests).
+   - `pytest tests/test_negative_cases.py tests/test_actor_diagnostic.py tests/test_budget_per_request.py tests/test_diagnostic_budget_ledger.py tests/test_diagnostic_modes_and_pipeline.py tests/test_actor_and_experiments.py`: **58 / 58 passed**.
    - Total regression test pass rate: **100%**.
 
 ---

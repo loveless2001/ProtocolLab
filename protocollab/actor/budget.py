@@ -176,3 +176,21 @@ class DiagnosticLedger:
         agg_usage.reserved_tokens = max(0, agg_usage.reserved_tokens - reservation_tokens)
         self._sync("diagnostic.call_failed")
 
+    def record_timeout(
+        self,
+        stage: str,
+        reservation_tokens: int,
+        req_id: str | None = None,
+        reason: str = "timeout",
+        *args: Any,
+        **kwargs: Any,
+    ):
+        stage_usage = self.state.stages[stage]
+        agg_usage = self.state.aggregate
+        stage_usage.failures += 1
+        stage_usage.reserved_tokens = max(0, stage_usage.reserved_tokens - reservation_tokens)
+        agg_usage.failures += 1
+        agg_usage.reserved_tokens = max(0, agg_usage.reserved_tokens - reservation_tokens)
+        self._sync("diagnostic.call_timeout")
+
+
