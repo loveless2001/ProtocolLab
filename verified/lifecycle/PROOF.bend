@@ -66,10 +66,13 @@ def Laws.witness_multi_stage_completion():
   {==}
 
 # PROOF 13: Validation Accounting Invariance
-def Laws.validation_accounting_invariance():
-  {==}
+def Laws.validation_accounting_invariance(rec, s, outcome):
+  match rec:
+    case None{}:
+      {==}
+    case Some{r}:
+      {==}
 
 # WITNESS PROOF 5: Validation Recorded Witness
 def Laws.witness_validation_recorded():
   {==}
-

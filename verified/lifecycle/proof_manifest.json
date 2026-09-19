@@ -20,12 +20,12 @@
       "bytes": 22288
     },
     "LAWS.bend": {
-      "sha256": "b79ac5d5637ebd7057737cf4d0e0f100840a9b86409118ea1c464e17fce9a9a0",
-      "bytes": 6520
+      "sha256": "fe12f91f9f335b6fb8bef9fdc16101c46dc976eaffc603e1289649cda9941505",
+      "bytes": 7564
     },
     "PROOF.bend": {
-      "sha256": "077f1dd7975dd8d3c558bcb0718b7c990785302899f08a32b4cdf681869cd530",
-      "bytes": 1411
+      "sha256": "662af2a6ddf1498fba30e87564ae2050fcbf0407e31a06f4dcdfacb4b8d2c8f8",
+      "bytes": 1682
     }
   },
   "laws": [
@@ -40,12 +40,14 @@
     "LAW-TERMINAL-FINALITY",
     "LAW-FAULT-LATCHING",
     "LAW-CROSS-STAGE-INDEPENDENCE",
-    "LAW-EVIDENCE-INTEGRITY"
+    "LAW-EVIDENCE-INTEGRITY",
+    "LAW-VALIDATION-ACCOUNTING-INVARIANCE"
   ],
   "witnesses": [
     "WITNESS-POSITIVE-SETTLEMENT",
     "WITNESS-POSITIVE-RELEASE",
     "WITNESS-POSITIVE-TIMEOUT",
-    "WITNESS-MULTI-STAGE-COMPLETION"
+    "WITNESS-MULTI-STAGE-COMPLETION",
+    "WITNESS-VALIDATION-RECORDED"
   ]
 }

@@ -210,21 +210,25 @@ def test_a03_restart_after_ready(store, bridge):
 # A04: Competing claimers, including separate database connections
 # Required assertion: At most one grant and one invocation.
 # ==============================================================================
-def test_a04_competing_claimers(store, bridge):
-    owner = make_owner(store, "run_a04", bridge)
-    gateway = owner.gateway
+def test_a04_competing_claimers(store, bridge, tmp_path):
+    store_file = tmp_path / "test_a04_shared.db"
+    store1 = Store(store_file)
+    store2 = Store(store_file)
+    owner1 = make_owner(store1, "run_a04", bridge)
+    owner2 = make_owner(store2, "run_a04", bridge)
+
     spec = make_spec("run_a04", "req_a04")
-    prep = gateway.prepare(spec)
+    prep = owner1.gateway.prepare(spec)
     assert isinstance(prep, PrepareReady)
 
     results = []
 
-    def try_claim():
+    def try_claim(gateway):
         res = gateway.claim_start("req_a04")
         results.append(res)
 
-    t1 = threading.Thread(target=try_claim)
-    t2 = threading.Thread(target=try_claim)
+    t1 = threading.Thread(target=try_claim, args=(owner1.gateway,))
+    t2 = threading.Thread(target=try_claim, args=(owner2.gateway,))
     t1.start()
     t2.start()
     t1.join()
@@ -435,7 +439,7 @@ def test_a09_genuine_not_sent_proof(store, bridge):
 # Required assertion: Bound replaced once with actual cost; no second call.
 # ==============================================================================
 def test_a10_timeout_then_late_verified_receipt(store, bridge):
-    owner = make_owner(store, "run_a10", bridge)
+    owner = make_owner(store, "run_a10", bridge, mode=LifecycleMode.SHADOW)
     gateway = owner.gateway
     spec = make_spec("run_a10", "req_a10", max_input=100, max_output=10)
 
@@ -466,15 +470,28 @@ def test_a10_timeout_then_late_verified_receipt(store, bridge):
     res_ev1 = gateway.record_evidence("req_a10", late_report)
     assert res_ev1.accounting_status == AccountingStatus.SETTLED
 
+    # Check both active legacy ledger and Bend projection
+    assert owner.state.aggregate.completed_calls == 1
+    assert owner.state.aggregate.input_tokens == 80
+    assert owner.state.aggregate.output_tokens == 15
+    assert owner.state.aggregate.reserved_tokens == 0
+
     summary1 = bridge.summarize(owner.bend_state)
     assert summary1.total_spent == 95
     assert summary1.total_held == 0
 
     # 3. Same receipt delivered second time
-    gateway.record_evidence("req_a10", late_report)
-    summary2 = bridge.summarize(owner.bend_state)
+    res_ev2 = gateway.record_evidence("req_a10", late_report)
+    assert type(res_ev2).__name__ in ("RecordEvidenceRecorded", "RecordEvidenceDuplicate")
 
-    assert summary2.total_spent == 95  # No double charge
+    # Active legacy ledger must NOT double-charge
+    assert owner.state.aggregate.completed_calls == 1
+    assert owner.state.aggregate.input_tokens == 80
+    assert owner.state.aggregate.output_tokens == 15
+    assert owner.state.aggregate.reserved_tokens == 0
+
+    summary2 = bridge.summarize(owner.bend_state)
+    assert summary2.total_spent == 95  # No double charge in Bend
 
 
 # ==============================================================================
@@ -513,6 +530,40 @@ def test_a11_shadow_mode_isolation(store, bridge):
 
     # Decisions and token accounting match across both modes
     assert results[LifecycleMode.SHADOW] == results[LifecycleMode.AUTHORITATIVE]
+
+    # Test observer disagreeing and unavailable scenarios in SHADOW mode
+    class ObserverDouble(VerifiedKernelBridge):
+        def __init__(self):
+            super().__init__()
+            self.refuse_dispatch = False
+            self.unavailable = False
+
+        def apply(self, state, ev):
+            if self.unavailable:
+                raise RuntimeError("INJECTED_SHADOW_UNAVAILABLE")
+            res = super().apply(state, ev)
+            from protocollab.verified.protocol import TransitionVerdict, VerdictKind
+            if self.refuse_dispatch and ev.get("kind") == "DispatchIntent":
+                return res.model_copy(update={"verdict": TransitionVerdict(kind=VerdictKind.REJECTED, reason="INJECTED_DISAGREEMENT")})
+            return res
+
+    for scenario, refuse, offline in [
+        ("disagreeing", True, False),
+        ("unavailable", False, True),
+    ]:
+        obs_bridge = ObserverDouble()
+        obs_bridge.refuse_dispatch = refuse
+        obs_bridge.unavailable = offline
+
+        run_id = f"run_a11_{scenario}"
+        owner_sc = make_owner(store, run_id, obs_bridge, mode=LifecycleMode.SHADOW)
+        spec_sc = make_spec(run_id, f"req_{scenario}")
+        prep_sc = owner_sc.gateway.prepare(spec_sc)
+        assert isinstance(prep_sc, PrepareReady)
+
+        claim_sc = owner_sc.gateway.claim_start(f"req_{scenario}")
+        assert isinstance(claim_sc, ClaimGranted), f"Scenario {scenario} failed active grant!"
+        assert owner_sc.state.aggregate.dispatched_inference == 1
 
 
 # ==============================================================================
@@ -677,3 +728,215 @@ def test_no_execution_failure_path_blocks_action_dispatch(store, bridge):
     )
     assert outcome.is_no_new_execution is True
     assert outcome.execution_state == ExecutionState.NOT_SENT
+
+
+# ==============================================================================
+# Review Probe Verification Tests (Probes 2–9 & Single Active Authority)
+# ==============================================================================
+def test_wrong_report_id_conflict(store, bridge):
+    """Probe 2: Report with attempt_id B delivered to handle A must be rejected as conflict."""
+    from protocollab.verified.attempt import RecordEvidenceConflict
+
+    owner = make_owner(store, "run_probe2", bridge)
+    spec_a = make_spec("run_probe2", "req_a")
+    spec_b = make_spec("run_probe2", "req_b")
+    owner.gateway.prepare(spec_a)
+    owner.gateway.claim_start("req_a")
+    owner.gateway.prepare(spec_b)
+
+    report_b = TransportReport(
+        attempt_id="req_b",
+        completion=True,
+        usage=UsageReport("VerifiedFinal", 80, 5, "receipt-b"),
+    )
+    verdict = owner.gateway.record_evidence("req_a", report_b)
+    assert isinstance(verdict, RecordEvidenceConflict)
+    assert "IDENTITY_MISMATCH" in verdict.reason
+
+    # Verify charge A was NOT settled with B's receipt
+    rec_a = owner.get_request_record("req_a")
+    rec_b = owner.get_request_record("req_b")
+    assert rec_a.charge.kind == ChargeKind.PENDING
+    assert rec_b.charge.kind == ChargeKind.PENDING
+
+
+def test_binding_restart_conflict(store, bridge):
+    """Probe 3: Changed immutable parameters must conflict both in-process and after restart."""
+    from dataclasses import replace
+
+    run_id = "run_probe3"
+    owner1 = make_owner(store, run_id, bridge)
+    s = make_spec(run_id, "req_p3", max_input=100, max_output=10)
+    prep = owner1.gateway.prepare(s)
+    assert isinstance(prep, PrepareReady)
+
+    s_changed = replace(
+        s,
+        input_ref="DIFFERENT_INPUT",
+        backend_and_configuration_ref="DIFFERENT_BACKEND",
+        max_input=500,
+        declared_reservation_charge=510,
+    )
+    assert isinstance(owner1.gateway.prepare(s_changed), PrepareConflict)
+
+    owner2 = make_owner(store, run_id, bridge)
+    after_restart = owner2.gateway.prepare(s_changed)
+    assert isinstance(after_restart, PrepareConflict)
+
+
+def test_not_sent_shadow_releases_reservation(store, bridge):
+    """Probe 4: Genuine not-sent report in SHADOW must release tokens on active legacy ledger."""
+    run_id = "run_probe4"
+    owner = make_owner(store, run_id, bridge, mode=LifecycleMode.SHADOW)
+    s = make_spec(run_id, "req_p4", max_input=100, max_output=10)
+
+    out = owner.gateway.execute_attempt(
+        s,
+        lambda permit: TransportReport(
+            attempt_id=permit.attempt_id,
+            not_sent_proof_ref="not-sent-proof",
+        ),
+        lambda r: ValidationReport(ValidationOutcome.NOT_ATTEMPTED),
+    )
+    assert out.execution_state == ExecutionState.NOT_SENT
+    assert out.accounting_status == AccountingStatus.RELEASED
+    assert out.held_tokens == 0
+
+    # Active legacy ledger must have released the 110 tokens
+    assert owner.state.aggregate.reserved_tokens == 0
+    assert owner.state.aggregate.failures == 1
+
+
+def test_late_receipt_duplicate_does_not_double_count_active(store, bridge):
+    """Probe 5: Duplicate late receipt must not double-charge legacy ledger; cached outcome must update."""
+    run_id = "run_probe5"
+    owner = make_owner(store, run_id, bridge, mode=LifecycleMode.SHADOW)
+    s = make_spec(run_id, "req_p5", max_input=100, max_output=10)
+
+    # First attempt times out
+    owner.gateway.execute_attempt(
+        s,
+        lambda permit: TransportReport(attempt_id=permit.attempt_id, error_ref="timeout"),
+        lambda r: ValidationReport(ValidationOutcome.REJECTED),
+    )
+
+    late = TransportReport(
+        attempt_id="req_p5",
+        completion=True,
+        usage=UsageReport("VerifiedFinal", 80, 15, "late-receipt-p5"),
+        raw_text="LATE_RESPONSE",
+    )
+    owner.gateway.record_evidence("req_p5", late)
+    assert owner.state.aggregate.completed_calls == 1
+    assert owner.state.aggregate.input_tokens == 80
+    assert owner.state.aggregate.output_tokens == 15
+
+    # Deliver same receipt a second time
+    owner.gateway.record_evidence("req_p5", late)
+    assert owner.state.aggregate.completed_calls == 1
+    assert owner.state.aggregate.input_tokens == 80
+    assert owner.state.aggregate.output_tokens == 15
+
+    # Replay must return updated outcome (80/15), not stale pending (0/110)
+    replayed = owner.gateway.execute_attempt(
+        s,
+        lambda permit: pytest.fail("Should not call backend"),
+        lambda r: ValidationReport(ValidationOutcome.ACCEPTED),
+    )
+    assert replayed.is_no_new_execution is True
+    assert replayed.confirmed_input == 80
+    assert replayed.confirmed_output == 15
+    assert replayed.held_tokens == 0
+    assert replayed.raw_response == "LATE_RESPONSE"
+
+
+def test_replay_does_not_mutate_returned_outcome(store, bridge):
+    """Probe 8: Replaying completed attempt must not mutate previously returned outcome in-place."""
+    run_id = "run_probe8"
+    owner = make_owner(store, run_id, bridge)
+    s = make_spec(run_id, "req_p8")
+
+    def success(permit):
+        assert permit.consume()
+        return TransportReport(
+            attempt_id=permit.attempt_id,
+            completion=True,
+            usage=UsageReport("VerifiedFinal", 100, 10, "receipt-p8"),
+            raw_text='{"kind":"WAIT"}',
+        )
+
+    first = owner.gateway.execute_attempt(s, success, lambda r: ValidationReport(ValidationOutcome.ACCEPTED))
+    assert first.is_no_new_execution is False
+
+    second = owner.gateway.execute_attempt(s, success, lambda r: ValidationReport(ValidationOutcome.ACCEPTED))
+    assert first.is_no_new_execution is False  # Must NOT be mutated!
+    assert second.is_no_new_execution is True
+    assert first is not second
+
+
+def test_restart_recovers_retained_raw_response_and_usage(store, bridge):
+    """Probe 7: Replay after restart must recover confirmed tokens and raw response."""
+    run_id = "run_probe7"
+    owner1 = make_owner(store, run_id, bridge)
+    s = make_spec(run_id, "req_p7")
+
+    def success(permit):
+        assert permit.consume()
+        return TransportReport(
+            attempt_id=permit.attempt_id,
+            completion=True,
+            usage=UsageReport("VerifiedFinal", 100, 10, "receipt-p7"),
+            raw_text='{"kind":"WAIT"}',
+            raw_response_ref="raw-p7",
+            observed_boundary_and_evidence_refs=["boundary-p7"],
+        )
+
+    owner1.gateway.execute_attempt(s, success, lambda r: ValidationReport(ValidationOutcome.ACCEPTED))
+
+    # Restart with fresh owner on same store
+    owner2 = make_owner(store, run_id, bridge)
+    recovered = owner2.gateway.execute_attempt(
+        s,
+        lambda p: pytest.fail("Should not call backend on replay"),
+        lambda r: ValidationReport(ValidationOutcome.ACCEPTED),
+    )
+    assert recovered.is_no_new_execution is True
+    assert recovered.confirmed_input == 100
+    assert recovered.confirmed_output == 10
+    assert recovered.held_tokens == 0
+    assert recovered.raw_response == '{"kind":"WAIT"}'
+
+
+def test_validator_exception_produces_structured_rejection(store, bridge):
+    """Probe 9: Validator throwing exception must preserve settled billing and return structured rejection."""
+    run_id = "run_probe9"
+    owner = make_owner(store, run_id, bridge)
+    s = make_spec(run_id, "req_p9")
+
+    def success(permit):
+        assert permit.consume()
+        return TransportReport(
+            attempt_id=permit.attempt_id,
+            completion=True,
+            usage=UsageReport("VerifiedFinal", 100, 10, "receipt-p9"),
+            raw_text='{"corrupt": true}',
+        )
+
+    def validator_throws(report):
+        raise ValueError("CHANNEL_EXTRACTION_FAILED")
+
+    out = owner.gateway.execute_attempt(s, success, validator_throws)
+    assert out.validation_outcome == "REJECTED"
+    assert out.confirmed_input == 100
+    assert out.confirmed_output == 10
+    assert out.held_tokens == 0
+    assert out.raw_response == '{"corrupt": true}'
+    assert out.error is not None
+    assert "CHANNEL_EXTRACTION_FAILED" in str(out.error)
+
+    # Billing was settled
+    assert owner.state.aggregate.completed_calls == 1
+    assert owner.state.aggregate.input_tokens == 100
+    assert owner.state.aggregate.output_tokens == 10
+    assert len(owner.gateway._outcomes) == 1
+

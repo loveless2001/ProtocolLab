@@ -323,14 +323,18 @@ class VerifiedLifecycleOwner:
 
             try:
                 res = self._apply_bridge(ev, "verified.call_reserved_shadow")
-                if legacy_res in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
-                    return VerdictKind.DUPLICATE_NOOP
-                return res.verdict.kind
+                if getattr(res.verdict, "kind", None) != legacy_res:
+                    logger.warning(
+                        "Verified shadow kernel reserve divergence: legacy=%s, observer=%s",
+                        legacy_res,
+                        getattr(res.verdict, "kind", None),
+                    )
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel reserve failed: %s", shadow_err)
-                if legacy_res in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
-                    return VerdictKind.DUPLICATE_NOOP
-                return VerdictKind.ACCEPTED
+
+            if legacy_res in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
+                return VerdictKind.DUPLICATE_NOOP
+            return VerdictKind.ACCEPTED
         else:
             res = self._apply_bridge(ev, "verified.call_reserved")
             if res.verdict.kind == VerdictKind.REJECTED:
@@ -355,17 +359,27 @@ class VerifiedLifecycleOwner:
         ev = {"kind": "DispatchIntent", "req_id": target_id}
 
         if self.mode == LifecycleMode.SHADOW:
-            legacy_disp = self.legacy_ledger.record_dispatched(stage, req_id=target_id)
+            res = None
             try:
                 res = self._apply_bridge(ev, "verified.call_dispatched_shadow")
-                if legacy_disp in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
-                    return VerdictKind.DUPLICATE_NOOP
-                return res.verdict.kind
             except Exception as shadow_err:
                 logger.warning("Verified shadow kernel record_dispatched failed: %s", shadow_err)
-                if legacy_disp in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
-                    return VerdictKind.DUPLICATE_NOOP
-                return VerdictKind.ACCEPTED
+
+            observer_kind = getattr(res.verdict, "kind", None) if res is not None else None
+            if observer_kind == VerdictKind.DUPLICATE_NOOP:
+                return VerdictKind.DUPLICATE_NOOP
+
+            legacy_disp = self.legacy_ledger.record_dispatched(stage, req_id=target_id)
+            if observer_kind is not None and observer_kind != legacy_disp:
+                logger.warning(
+                    "Verified shadow kernel record_dispatched divergence: legacy=%s, observer=%s",
+                    legacy_disp,
+                    observer_kind,
+                )
+
+            if legacy_disp in ("DuplicateNoop", VerdictKind.DUPLICATE_NOOP):
+                return VerdictKind.DUPLICATE_NOOP
+            return VerdictKind.ACCEPTED
         else:
             res = self._apply_bridge(ev, "verified.call_dispatched")
             if res.verdict.kind == VerdictKind.REJECTED:
@@ -415,9 +429,23 @@ class VerifiedLifecycleOwner:
         }
 
         if self.mode == LifecycleMode.SHADOW:
-            self.legacy_ledger.record_completed(
-                stage, input_tokens, output_tokens, reservation_tokens
-            )
+            # Prevent double-billing active legacy ledger on duplicate receipt (§3, §5)
+            rec = self.get_request_record(target_id)
+            is_dup = False
+            if rec is not None:
+                charge_kind = getattr(rec.charge, "kind", getattr(rec.charge, "value", str(rec.charge)))
+                if charge_kind in ("Settled", "SETTLED"):
+                    if (
+                        getattr(rec.charge, "input_tokens", None) == input_tokens
+                        and getattr(rec.charge, "output_tokens", None) == output_tokens
+                        and (getattr(rec.charge, "receipt_hash", None) == receipt_hash or not getattr(rec.charge, "receipt_hash", None))
+                    ):
+                        is_dup = True
+
+            if not is_dup:
+                self.legacy_ledger.record_completed(
+                    stage, input_tokens, output_tokens, reservation_tokens
+                )
             try:
                 self._apply_bridge(ev, "verified.call_completed_shadow")
             except Exception as shadow_err:
@@ -454,6 +482,13 @@ class VerifiedLifecycleOwner:
                 stage_queue.remove(target_id)
 
         self._stage_last_completed[stage] = target_id
+
+        if reservation_tokens == 0:
+            rec = self.get_request_record(target_id)
+            if rec is not None:
+                charge_kind = getattr(rec.charge, "kind", getattr(rec.charge, "value", str(rec.charge)))
+                if charge_kind in ("Pending", "PENDING"):
+                    reservation_tokens = getattr(rec.charge, "tokens", 0) or 0
 
         ev = {
             "kind": "FailureConclusive",

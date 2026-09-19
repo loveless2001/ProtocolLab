@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from typing import Any, Callable
 
@@ -260,6 +260,146 @@ class AttemptGateway:
         # Seed existing persisted requests from owner into gateway records
         self._sync_from_owner()
 
+    def _save_spec(self, spec: AttemptSpec) -> None:
+        """Persist attempt specification to memory and backing store."""
+        self._specs[spec.attempt_id] = spec
+        if hasattr(self.owner, "store") and hasattr(self.owner.store, "set"):
+            self.owner.store.set(
+                "verified_attempt_specs",
+                f"{self.owner.run_id}:{spec.attempt_id}",
+                asdict(spec),
+                "verified.attempt_spec_persisted",
+            )
+
+    def _load_spec(self, attempt_id: str) -> AttemptSpec | None:
+        """Load attempt specification from memory cache or backing store."""
+        if attempt_id in self._specs:
+            return self._specs[attempt_id]
+        if hasattr(self.owner, "store") and hasattr(self.owner.store, "get"):
+            stored = self.owner.store.get("verified_attempt_specs", f"{self.owner.run_id}:{attempt_id}")
+            if stored is not None and isinstance(stored, dict):
+                spec = AttemptSpec(**stored)
+                self._specs[attempt_id] = spec
+                return spec
+        return None
+
+    def _save_outcome(
+        self,
+        handle: str,
+        outcome: AttemptOutcome,
+        report: TransportReport | None = None,
+    ) -> None:
+        """Persist attempt outcome and raw transport evidence to store."""
+        self._outcomes[handle] = outcome
+        if hasattr(self.owner, "store") and hasattr(self.owner.store, "set"):
+            outcome_dict = {
+                "attempt_id": outcome.attempt_id,
+                "execution_state": outcome.execution_state.value if isinstance(outcome.execution_state, Enum) else str(outcome.execution_state),
+                "accounting_status": outcome.accounting_status.value if isinstance(outcome.accounting_status, Enum) else str(outcome.accounting_status),
+                "validation_outcome": outcome.validation_outcome,
+                "confirmed_input": outcome.confirmed_input,
+                "confirmed_output": outcome.confirmed_output,
+                "held_tokens": outcome.held_tokens,
+                "is_no_new_execution": outcome.is_no_new_execution,
+                "raw_response": outcome.raw_response,
+                "parsed_payload": outcome.parsed_payload,
+                "winning_json": outcome.winning_json,
+                "compute_meta": outcome.compute_meta,
+                "evaluations": outcome.evaluations,
+                "conflict": outcome.conflict,
+            }
+            self.owner.store.set(
+                "verified_attempt_outcomes",
+                f"{self.owner.run_id}:{handle}",
+                outcome_dict,
+                "verified.attempt_outcome_persisted",
+            )
+            if report is not None:
+                rep_dict = {
+                    "attempt_id": report.attempt_id,
+                    "completion": report.completion,
+                    "raw_text": report.raw_text,
+                    "raw_response_ref": report.raw_response_ref,
+                    "observed_boundary_and_evidence_refs": report.observed_boundary_and_evidence_refs,
+                    "usage": asdict(report.usage) if hasattr(report.usage, "__dataclass_fields__") else getattr(report.usage, "__dict__", {}),
+                    "not_sent_proof_ref": report.not_sent_proof_ref,
+                    "error_ref": report.error_ref,
+                    "stop_reason": report.stop_reason,
+                }
+                self.owner.store.set(
+                    "verified_attempt_evidence",
+                    f"{self.owner.run_id}:{handle}",
+                    rep_dict,
+                    "verified.attempt_evidence_persisted",
+                )
+
+    def _load_outcome(self, handle: str) -> AttemptOutcome | None:
+        """Load outcome from memory cache or reconstruct from store."""
+        if handle in self._outcomes:
+            return self._outcomes[handle]
+        if hasattr(self.owner, "store") and hasattr(self.owner.store, "get"):
+            stored = self.owner.store.get("verified_attempt_outcomes", f"{self.owner.run_id}:{handle}")
+            if stored is not None and isinstance(stored, dict):
+                outcome = AttemptOutcome(
+                    attempt_id=stored["attempt_id"],
+                    execution_state=ExecutionState(stored["execution_state"]),
+                    accounting_status=AccountingStatus(stored["accounting_status"]),
+                    validation_outcome=stored["validation_outcome"],
+                    confirmed_input=stored.get("confirmed_input", 0),
+                    confirmed_output=stored.get("confirmed_output", 0),
+                    held_tokens=stored.get("held_tokens", 0),
+                    is_no_new_execution=stored.get("is_no_new_execution", False),
+                    raw_response=stored.get("raw_response"),
+                    parsed_payload=stored.get("parsed_payload"),
+                    winning_json=stored.get("winning_json"),
+                    compute_meta=stored.get("compute_meta"),
+                    evaluations=stored.get("evaluations"),
+                    conflict=stored.get("conflict"),
+                )
+                self._outcomes[handle] = outcome
+                return outcome
+
+            # Fallback to evidence and request record
+            ev_stored = self.owner.store.get("verified_attempt_evidence", f"{self.owner.run_id}:{handle}")
+            rec = self.owner.get_request_record(handle)
+            if rec is not None:
+                raw_resp = ev_stored.get("raw_text") if isinstance(ev_stored, dict) else None
+                charge_kind = getattr(rec.charge, "kind", getattr(rec.charge, "value", str(rec.charge)))
+                if charge_kind in ("Settled", "SETTLED"):
+                    acct_st = AccountingStatus.SETTLED
+                    exec_st = ExecutionState.FINISHED
+                    conf_in = getattr(rec.charge, "input_tokens", 0) or 0
+                    conf_out = getattr(rec.charge, "output_tokens", 0) or 0
+                    held = 0
+                elif charge_kind in ("Released", "RELEASED"):
+                    acct_st = AccountingStatus.RELEASED
+                    exec_st = ExecutionState.NOT_SENT
+                    conf_in = 0
+                    conf_out = 0
+                    held = 0
+                else:
+                    acct_st = AccountingStatus.PENDING
+                    exec_st = ExecutionState.STARTED
+                    conf_in = 0
+                    conf_out = 0
+                    held = getattr(rec.charge, "tokens", 0) or 0
+
+                outcome = AttemptOutcome(
+                    attempt_id=handle,
+                    execution_state=exec_st,
+                    accounting_status=acct_st,
+                    validation_outcome="NO_NEW_EXECUTION",
+                    confirmed_input=conf_in,
+                    confirmed_output=conf_out,
+                    held_tokens=held,
+                    is_no_new_execution=True,
+                    raw_response=raw_resp,
+                )
+                self._outcomes[handle] = outcome
+                return outcome
+
+        return None
+
     def _sync_from_owner(self) -> None:
         """Hydrate Gateway known attempts from the underlying store / owner."""
         bend_state = getattr(self.owner, "bend_state", None)
@@ -284,7 +424,7 @@ class AttemptGateway:
         """Atomically persist binding and reservation; become READY (§3)."""
         with self._lock:
             # Check for existing binding under this attempt_id
-            existing_spec = self._specs.get(spec.attempt_id)
+            existing_spec = self._load_spec(spec.attempt_id)
             if existing_spec is not None:
                 if existing_spec.binding_hash != spec.binding_hash:
                     return PrepareConflict(
@@ -294,27 +434,33 @@ class AttemptGateway:
                 exec_state = self._execution_states.get(
                     spec.attempt_id, ExecutionState.READY
                 )
-                outcome = self._outcomes.get(spec.attempt_id)
+                outcome = self._load_outcome(spec.attempt_id)
                 return PrepareExisting(
                     handle=spec.attempt_id,
-                    spec=spec,
+                    spec=existing_spec,
                     execution_state=exec_state,
                     outcome=outcome,
                 )
 
-            # Check if underlying owner already recorded this req_id with different basis
+            # Check if underlying owner already recorded this req_id with different basis/caps/stage
             existing_req = self.owner.get_request_record(spec.attempt_id)
             if existing_req is not None:
-                if existing_req.basis_ref != spec.original_decision_basis_ref:
+                if (
+                    existing_req.basis_ref != spec.original_decision_basis_ref
+                    or existing_req.max_input != spec.max_input
+                    or existing_req.max_output != spec.max_output
+                    or existing_req.stage != spec.stage
+                ):
                     return PrepareConflict(
-                        f"IDENTITY_CONFLICT: request {spec.attempt_id} in ledger "
-                        f"has basis {existing_req.basis_ref!r} != {spec.original_decision_basis_ref!r}"
+                        f"IDENTITY_CONFLICT: request {spec.attempt_id} in ledger has conflicting parameters "
+                        f"(basis={existing_req.basis_ref!r}, max_in={existing_req.max_input}, max_out={existing_req.max_output}, stage={existing_req.stage!r}) "
+                        f"!= spec (basis={spec.original_decision_basis_ref!r}, max_in={spec.max_input}, max_out={spec.max_output}, stage={spec.stage!r})"
                     )
-                self._specs[spec.attempt_id] = spec
+                self._save_spec(spec)
                 exec_state = self._execution_states.get(
                     spec.attempt_id, ExecutionState.READY
                 )
-                outcome = self._outcomes.get(spec.attempt_id)
+                outcome = self._load_outcome(spec.attempt_id)
                 return PrepareExisting(
                     handle=spec.attempt_id,
                     spec=spec,
@@ -338,7 +484,6 @@ class AttemptGateway:
                 max_output=spec.max_output,
             )
 
-
             res_kind = getattr(v_res, "kind", getattr(v_res, "value", v_res))
             if res_kind in (VerdictKind.REJECTED, "Rejected", "REJECTED"):
                 reason = getattr(v_res, "reason", "RESERVATION_REJECTED")
@@ -347,7 +492,7 @@ class AttemptGateway:
                 reason = getattr(v_res, "reason", "RESERVATION_CONFLICT")
                 return PrepareConflict(str(reason))
             if res_kind in (VerdictKind.DUPLICATE_NOOP, "DuplicateNoop", "DUPLICATE_NOOP"):
-                self._specs[spec.attempt_id] = spec
+                self._save_spec(spec)
                 exec_state = self._execution_states.get(
                     spec.attempt_id, ExecutionState.READY
                 )
@@ -355,11 +500,11 @@ class AttemptGateway:
                     handle=spec.attempt_id,
                     spec=spec,
                     execution_state=exec_state,
-                    outcome=self._outcomes.get(spec.attempt_id),
+                    outcome=self._load_outcome(spec.attempt_id),
                 )
 
             # Binding succeeded and is within limits -> READY
-            self._specs[spec.attempt_id] = spec
+            self._save_spec(spec)
             self._execution_states[spec.attempt_id] = ExecutionState.READY
             return PrepareReady(handle=spec.attempt_id, spec=spec)
 
@@ -433,23 +578,42 @@ class AttemptGateway:
     ) -> RecordEvidenceVerdict:
         """Record transport evidence and settle or hold pending cost (§3, §4, §5)."""
         with self._lock:
-            spec = self._specs.get(handle)
+            # Identity Verification: report must match the attempt handle (§2, §4)
+            if report.attempt_id != handle:
+                return RecordEvidenceConflict(
+                    f"IDENTITY_MISMATCH: report attempt_id {report.attempt_id!r} does not match handle {handle!r}"
+                )
+
+            spec = self._load_spec(handle)
             stage = spec.stage if spec else None
-            if stage is None:
-                rec = self.owner.get_request_record(handle)
-                if rec is not None:
-                    stage = rec.stage
+            rec = self.owner.get_request_record(handle)
+            if stage is None and rec is not None:
+                stage = rec.stage
             if stage is None:
                 stage = "stage1"
 
             # 1. Conclusively proven not-sent: release held reservation
             if report.not_sent_proof_ref is not None and not report.completion:
+                rel_tokens = spec.declared_reservation_charge if spec else 0
+                if rel_tokens == 0 and rec:
+                    charge_kind = getattr(rec.charge, "kind", getattr(rec.charge, "value", str(rec.charge)))
+                    if charge_kind in ("Pending", "PENDING"):
+                        rel_tokens = getattr(rec.charge, "tokens", 0) or 0
                 self.owner.record_failed(
                     stage=stage,
+                    reservation_tokens=rel_tokens,
                     req_id=handle,
                     evidence_hash=report.not_sent_proof_ref,
                 )
                 self._execution_states[handle] = ExecutionState.NOT_SENT
+                outcome = AttemptOutcome(
+                    attempt_id=handle,
+                    execution_state=ExecutionState.NOT_SENT,
+                    accounting_status=AccountingStatus.RELEASED,
+                    validation_outcome=ValidationOutcome.NOT_ATTEMPTED.value,
+                    held_tokens=0,
+                )
+                self._save_outcome(handle, outcome, report)
                 return RecordEvidenceRecorded(
                     execution_state=ExecutionState.NOT_SENT,
                     accounting_status=AccountingStatus.RELEASED,
@@ -460,12 +624,39 @@ class AttemptGateway:
                 receipt_ref = report.usage.receipt_ref or digest(
                     f"{handle}:{report.usage.input_tokens}:{report.usage.output_tokens}"
                 )
+
+                # Deduplication and conflict check against existing record
+                if rec is not None:
+                    charge_kind = getattr(rec.charge, "kind", getattr(rec.charge, "value", str(rec.charge)))
+                    if charge_kind in ("Settled", "SETTLED"):
+                        inp_match = getattr(rec.charge, "input_tokens", None) == report.usage.input_tokens
+                        out_match = getattr(rec.charge, "output_tokens", None) == report.usage.output_tokens
+                        rec_hash = getattr(rec.charge, "receipt_hash", None)
+                        hash_match = (rec_hash == receipt_ref) or (not rec_hash)
+                        if inp_match and out_match and hash_match:
+                            self._execution_states[handle] = ExecutionState.FINISHED
+                            return RecordEvidenceDuplicate(retained_ref=receipt_ref)
+                        else:
+                            return RecordEvidenceConflict(
+                                f"CONFLICTING_USAGE_RECEIPT: attempt {handle} already settled with different usage/receipt"
+                            )
+                    elif charge_kind in ("Released", "RELEASED"):
+                        return RecordEvidenceConflict(
+                            f"CONFLICTING_USAGE_AFTER_RELEASE: attempt {handle} already released"
+                        )
+
+                res_tokens = spec.declared_reservation_charge if spec else 0
+                if res_tokens == 0 and rec:
+                    charge_kind = getattr(rec.charge, "kind", getattr(rec.charge, "value", str(rec.charge)))
+                    if charge_kind in ("Pending", "PENDING"):
+                        res_tokens = getattr(rec.charge, "tokens", 0) or 0
+
                 try:
                     self.owner.record_completed(
                         stage=stage,
                         input_tokens=report.usage.input_tokens,
                         output_tokens=report.usage.output_tokens,
-                        reservation_tokens=spec.declared_reservation_charge if spec else 0,
+                        reservation_tokens=res_tokens,
                         req_id=handle,
                         receipt_hash=receipt_ref,
                     )
@@ -474,6 +665,29 @@ class AttemptGateway:
                         return RecordEvidenceConflict(reason=str(err))
                     raise
                 self._execution_states[handle] = ExecutionState.FINISHED
+                existing_out = self._outcomes.get(handle)
+                if existing_out is not None:
+                    updated_out = replace(
+                        existing_out,
+                        execution_state=ExecutionState.FINISHED,
+                        accounting_status=AccountingStatus.SETTLED,
+                        confirmed_input=report.usage.input_tokens,
+                        confirmed_output=report.usage.output_tokens,
+                        held_tokens=0,
+                        raw_response=report.raw_text or existing_out.raw_response,
+                    )
+                else:
+                    updated_out = AttemptOutcome(
+                        attempt_id=handle,
+                        execution_state=ExecutionState.FINISHED,
+                        accounting_status=AccountingStatus.SETTLED,
+                        validation_outcome="UNKNOWN",
+                        confirmed_input=report.usage.input_tokens,
+                        confirmed_output=report.usage.output_tokens,
+                        held_tokens=0,
+                        raw_response=report.raw_text,
+                    )
+                self._save_outcome(handle, updated_out, report)
                 return RecordEvidenceRecorded(
                     execution_state=ExecutionState.FINISHED,
                     accounting_status=AccountingStatus.SETTLED,
@@ -488,6 +702,25 @@ class AttemptGateway:
             )
 
             self._execution_states[handle] = ExecutionState.STARTED
+            existing_out = self._outcomes.get(handle)
+            if existing_out is not None:
+                updated_out = replace(
+                    existing_out,
+                    execution_state=ExecutionState.STARTED,
+                    accounting_status=AccountingStatus.PENDING,
+                    held_tokens=spec.declared_reservation_charge if spec else 0,
+                    raw_response=report.raw_text or existing_out.raw_response,
+                )
+            else:
+                updated_out = AttemptOutcome(
+                    attempt_id=handle,
+                    execution_state=ExecutionState.STARTED,
+                    accounting_status=AccountingStatus.PENDING,
+                    validation_outcome="UNKNOWN",
+                    held_tokens=spec.declared_reservation_charge if spec else 0,
+                    raw_response=report.raw_text,
+                )
+            self._save_outcome(handle, updated_out, report)
             return RecordEvidenceRecorded(
                 execution_state=ExecutionState.STARTED,
                 accounting_status=AccountingStatus.PENDING,
@@ -538,22 +771,35 @@ class AttemptGateway:
             ):
                 # Return retained result without new call or charge (§3, §8 A02)
                 if prep.outcome is not None:
-                    cached = prep.outcome
-                    cached.is_no_new_execution = True
-                    return cached
+                    return replace(prep.outcome, is_no_new_execution=True)
+                rec = self.owner.get_request_record(spec.attempt_id)
+                charge_kind = getattr(rec.charge, "kind", getattr(rec.charge, "value", str(rec.charge))) if rec else ""
+                conf_in = getattr(rec.charge, "input_tokens", 0) or 0 if rec and charge_kind in ("Settled", "SETTLED") else 0
+                conf_out = getattr(rec.charge, "output_tokens", 0) or 0 if rec and charge_kind in ("Settled", "SETTLED") else 0
+                acct_st = (
+                    AccountingStatus.SETTLED
+                    if prep.execution_state == ExecutionState.FINISHED
+                    else AccountingStatus.RELEASED
+                )
                 return AttemptOutcome(
                     attempt_id=spec.attempt_id,
                     execution_state=prep.execution_state,
-                    accounting_status=AccountingStatus.SETTLED,
+                    accounting_status=acct_st,
                     validation_outcome="NO_NEW_EXECUTION",
+                    confirmed_input=conf_in,
+                    confirmed_output=conf_out,
+                    held_tokens=0,
                     is_no_new_execution=True,
                 )
             if prep.execution_state == ExecutionState.STARTED:
+                if prep.outcome is not None:
+                    return replace(prep.outcome, is_no_new_execution=True)
                 return AttemptOutcome(
                     attempt_id=spec.attempt_id,
                     execution_state=ExecutionState.STARTED,
                     accounting_status=AccountingStatus.PENDING,
                     validation_outcome="ALREADY_IN_PROGRESS",
+                    held_tokens=spec.declared_reservation_charge,
                     is_no_new_execution=True,
                 )
 
@@ -606,7 +852,15 @@ class AttemptGateway:
             held = spec.declared_reservation_charge
 
         # Step 5: Record Validation (Decoupled from Accounting)
-        val_report = validator(transport_report)
+        # Any validator exception preserves settled accounting and produces a standardized rejection outcome (§4, §7)
+        try:
+            val_report = validator(transport_report)
+        except Exception as val_exc:
+            val_report = ValidationReport(
+                outcome=ValidationOutcome.REJECTED,
+                reason=f"VALIDATOR_EXCEPTION:{type(val_exc).__name__}:{val_exc}",
+            )
+
         self.record_validation(spec.attempt_id, val_report)
 
         outcome = AttemptOutcome(
@@ -627,6 +881,6 @@ class AttemptGateway:
             error=RuntimeError(val_report.reason) if val_report.reason else None,
         )
         with self._lock:
-            self._outcomes[spec.attempt_id] = outcome
+            self._save_outcome(spec.attempt_id, outcome, transport_report)
 
         return outcome
