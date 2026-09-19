@@ -155,7 +155,103 @@ MUTATIONS: dict[str, tuple[str, str, str]] = {
         """case T.ChargeReleased{ex_hash}:
               T.TransResult{state, T.Accepted{None{}}}""",
     ),
+    "MUTATION_VALIDATION_ZEROES_USAGE": (
+        "Zeroes confirmed usage during validation instead of preserving accounting",
+        """def apply_validation.step(
+  rec: Maybe<&2, T.RequestRecord>,
+  state: T.LedgerState,
+  outcome: String
+) -> T.TransitionResult:
+  match rec:
+    case None{}:
+      T.TransResult{state, T.Rejected{"REQUEST_NOT_FOUND"}}
+    case Some{r}:
+      T.TransResult{state, T.Accepted{None{}}}""",
+        """def apply_validation.step(
+  rec: Maybe<&2, T.RequestRecord>,
+  state: T.LedgerState,
+  outcome: String
+) -> T.TransitionResult:
+  match rec:
+    case None{}:
+      T.TransResult{state, T.Rejected{"REQUEST_NOT_FOUND"}}
+    case Some{r}:
+      match r:
+        case T.ReqRecord{id, stage, basis_ref, config_hash, max_input, max_output, transport, charge}:
+          match state:
+            case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
+              updated = {T.ReqRecord{
+                id, stage, basis_ref, config_hash, max_input, max_output,
+                transport,
+                T.ChargeSettled{0n, 0n, "zeroed"}
+              } : T.RequestRecord}
+              T.TransResult{
+                T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
+                T.Accepted{None{}}
+              }""",
+    ),
+    "MUTATION_VALIDATION_RELEASES_HELD": (
+        "Releases held reservation during validation instead of preserving accounting",
+        """def apply_validation.step(
+  rec: Maybe<&2, T.RequestRecord>,
+  state: T.LedgerState,
+  outcome: String
+) -> T.TransitionResult:
+  match rec:
+    case None{}:
+      T.TransResult{state, T.Rejected{"REQUEST_NOT_FOUND"}}
+    case Some{r}:
+      T.TransResult{state, T.Accepted{None{}}}""",
+        """def apply_validation.step(
+  rec: Maybe<&2, T.RequestRecord>,
+  state: T.LedgerState,
+  outcome: String
+) -> T.TransitionResult:
+  match rec:
+    case None{}:
+      T.TransResult{state, T.Rejected{"REQUEST_NOT_FOUND"}}
+    case Some{r}:
+      match r:
+        case T.ReqRecord{id, stage, basis_ref, config_hash, max_input, max_output, transport, charge}:
+          match state:
+            case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, fault}:
+              updated = {T.ReqRecord{
+                id, stage, basis_ref, config_hash, max_input, max_output,
+                transport,
+                T.ChargeReleased{"val_released"}
+              } : T.RequestRecord}
+              T.TransResult{
+                T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, D.update_request(requests, updated), fault},
+                T.Accepted{None{}}
+              }""",
+    ),
+    "MUTATION_VALIDATION_EMITS_PERMIT": (
+        "Emits an execution permit during validation transition",
+        """def apply_validation.step(
+  rec: Maybe<&2, T.RequestRecord>,
+  state: T.LedgerState,
+  outcome: String
+) -> T.TransitionResult:
+  match rec:
+    case None{}:
+      T.TransResult{state, T.Rejected{"REQUEST_NOT_FOUND"}}
+    case Some{r}:
+      T.TransResult{state, T.Accepted{None{}}}""",
+        """def apply_validation.step(
+  rec: Maybe<&2, T.RequestRecord>,
+  state: T.LedgerState,
+  outcome: String
+) -> T.TransitionResult:
+  match rec:
+    case None{}:
+      T.TransResult{state, T.Rejected{"REQUEST_NOT_FOUND"}}
+    case Some{r}:
+      match r:
+        case T.ReqRecord{id, stage, basis_ref, config_hash, max_input, max_output, transport, charge}:
+          T.TransResult{state, T.Accepted{Some{T.InferenceDispatchIntent{id, stage, basis_ref, config_hash, max_input, max_output}}}}""",
+    ),
 }
+
 
 
 def apply_mutation(content: str, mutation_name: str) -> str:
@@ -226,7 +322,7 @@ if __name__ == "__main__":
             print(f"  [ESCAPED] {name} - Proof did not catch mutation!")
             all_caught = False
     if all_caught:
-        print("\nAll 11 mutations caught by proof verification.")
+        print(f"\nAll {len(MUTATIONS)} mutations caught by proof verification.")
     else:
         print("\nSome mutations escaped!")
         exit(1)

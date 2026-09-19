@@ -68,6 +68,7 @@ type LifecycleEvent is Data:
   }
   EvFailureConclusive{req_id: String, evidence_hash: String}
   EvTimeoutUnknown{req_id: String, reason: String}
+  EvValidationRecorded{req_id: String, outcome: String}
 
 type TransitionVerdict is Data:
   Accepted{intent: Maybe<&2, EffectIntent>}

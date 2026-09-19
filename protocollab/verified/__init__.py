@@ -1,5 +1,17 @@
 """Verified lifecycle kernel package."""
 
+from protocollab.verified.attempt import (
+    AccountingStatus,
+    AttemptGateway,
+    AttemptOutcome,
+    AttemptSpec,
+    ExecutionState,
+    OneShotPermit,
+    TransportReport,
+    UsageReport,
+    ValidationOutcome,
+    ValidationReport,
+)
 from protocollab.verified.bridge import VerifiedKernelBridge
 from protocollab.verified.lifecycle_owner import VerifiedLifecycleOwner
 from protocollab.verified.protocol import (
@@ -34,4 +46,15 @@ __all__ = [
     "LifecycleMode",
     "VerifiedKernelBridge",
     "VerifiedLifecycleOwner",
+    "AttemptGateway",
+    "AttemptSpec",
+    "AttemptOutcome",
+    "ExecutionState",
+    "AccountingStatus",
+    "ValidationOutcome",
+    "ValidationReport",
+    "OneShotPermit",
+    "TransportReport",
+    "UsageReport",
 ]
+

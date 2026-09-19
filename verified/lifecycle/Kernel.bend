@@ -530,6 +530,33 @@ def apply_transport(state: T.LedgerState, req_id: String, boundary: String) -> T
             boundary
           )
 
+def apply_validation.step(
+  rec: Maybe<&2, T.RequestRecord>,
+  state: T.LedgerState,
+  outcome: String
+) -> T.TransitionResult:
+  match rec:
+    case None{}:
+      T.TransResult{state, T.Rejected{"REQUEST_NOT_FOUND"}}
+    case Some{r}:
+      T.TransResult{state, T.Accepted{None{}}}
+
+def apply_validation(state: T.LedgerState, req_id: String, outcome: String) -> T.TransitionResult:
+  match state:
+    case T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, +requests, fault}:
+      match fault:
+        case Some{f_reason}:
+          T.TransResult{
+            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, Some{f_reason}},
+            T.Rejected{"STATE_FAULT_LATCHED"}
+          }
+        case None{}:
+          apply_validation.step(
+            D.find_request(requests, req_id),
+            T.LState{run_id, cfg_hash, agg_max_calls, agg_max_tokens, stage_limits, requests, None{}},
+            outcome
+          )
+
 def apply(state: T.LedgerState, event: T.LifecycleEvent) -> T.TransitionResult:
   match event:
     case T.EvReserve{req_id, stage, basis_ref, config_hash, max_input, max_output}:
@@ -544,11 +571,18 @@ def apply(state: T.LedgerState, event: T.LifecycleEvent) -> T.TransitionResult:
       apply_failure(state, req_id, evidence_hash)
     case T.EvTimeoutUnknown{req_id, reason}:
       apply_timeout(state, req_id, reason)
+    case T.EvValidationRecorded{req_id, outcome}:
+      apply_validation(state, req_id, outcome)
 
 def result_state(res: T.TransitionResult) -> T.LedgerState:
   match res:
     case T.TransResult{next_state, verdict}:
       next_state
+
+def result_verdict(res: T.TransitionResult) -> T.TransitionVerdict:
+  match res:
+    case T.TransResult{next_state, verdict}:
+      verdict
 
 def fold(events: List<&2, T.LifecycleEvent>, initial: T.LedgerState) -> T.LedgerState:
   match events:

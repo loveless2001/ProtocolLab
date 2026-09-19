@@ -64,3 +64,12 @@ def Laws.witness_positive_timeout():
 # WITNESS PROOF 4: Multi-Stage Independent Completion
 def Laws.witness_multi_stage_completion():
   {==}
+
+# PROOF 13: Validation Accounting Invariance
+def Laws.validation_accounting_invariance():
+  {==}
+
+# WITNESS PROOF 5: Validation Recorded Witness
+def Laws.witness_validation_recorded():
+  {==}
+

@@ -172,3 +172,33 @@ law witness_multi_stage_completion:
       )
     )
   ) == True{} : Bool}
+
+# LAW 13: Validation Accounting Invariance (§9 Initial Proof Gate)
+law validation_accounting_invariance:
+  {Bool.and(
+    D.accounting_equal(
+      D.summarize(K.result_state(K.apply(state_settled(), T.EvValidationRecorded{"req_1", "ACCEPTED"}))),
+      D.summarize(state_settled())
+    ),
+    Bool.and(
+      D.accounting_equal(
+        D.summarize(K.result_state(K.apply(state_reserved(), T.EvValidationRecorded{"req_1", "REJECTED_INVALID_JSON"}))),
+        D.summarize(state_reserved())
+      ),
+      Bool.and(
+        Bool.not(D.verdict_emits_permit(K.result_verdict(K.apply(state_settled(), T.EvValidationRecorded{"req_1", "ACCEPTED"})))),
+        Bool.not(D.verdict_emits_permit(K.result_verdict(K.apply(state_reserved(), T.EvValidationRecorded{"req_1", "REJECTED_INVALID_JSON"}))))
+      )
+    )
+  ) == True{} : Bool}
+
+# WITNESS 5: Validation Recorded Witness (Accepted, Rejected, Extraction Failure)
+law witness_validation_recorded:
+  {Bool.and(
+    Bool.not(D.verdict_emits_permit(K.result_verdict(K.apply(state_settled(), T.EvValidationRecorded{"req_1", "ACCEPTED"})))),
+    Bool.and(
+      Bool.not(D.verdict_emits_permit(K.result_verdict(K.apply(state_settled(), T.EvValidationRecorded{"req_1", "REJECTED_INVALID_JSON"})))),
+      Bool.not(D.verdict_emits_permit(K.result_verdict(K.apply(state_reserved(), T.EvValidationRecorded{"req_1", "EXTRACTION_FAILURE"}))))
+    )
+  ) == True{} : Bool}
+

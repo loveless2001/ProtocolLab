@@ -21,6 +21,7 @@ from protocollab.verified.protocol import (
     LedgerState,
     LifecycleMode,
     StageLimit,
+    TransitionVerdict,
     TransportState,
     VerdictKind,
 )
@@ -106,12 +107,25 @@ class VerifiedLifecycleOwner:
                 for req in self.bend_state.requests:
                     self.legacy_ledger._seen_req_ids.add(req.req_id)
 
+        from protocollab.verified.attempt import AttemptGateway
+        self.gateway = AttemptGateway(self)
+
+    def get_request_record(self, req_id: str):
+        """Retrieve request record by req_id from verified state."""
+        self._refresh_state()
+        if self.bend_state and hasattr(self.bend_state, "requests"):
+            for req in self.bend_state.requests:
+                if req.req_id == req_id:
+                    return req
+        return None
+
     @property
     def state(self) -> DiagnosticLedgerState:
         """Project the current verified Bend state as a DiagnosticLedgerState."""
         if self.mode == LifecycleMode.SHADOW:
             return self.legacy_ledger.state
         return self.project_diagnostic_state()
+
 
     def project_diagnostic_state(self) -> DiagnosticLedgerState:
         """Direct projection from Bend LedgerState into DiagnosticLedgerState."""
@@ -365,7 +379,7 @@ class VerifiedLifecycleOwner:
         stage: str,
         input_tokens: int,
         output_tokens: int,
-        reservation_tokens: int,
+        reservation_tokens: int = 0,
         req_id: str | None = None,
         receipt_hash: str = "receipt_default",
     ):
@@ -418,10 +432,11 @@ class VerifiedLifecycleOwner:
     def record_failed(
         self,
         stage: str,
-        reservation_tokens: int,
+        reservation_tokens: int = 0,
         req_id: str | None = None,
         evidence_hash: str = "conclusive_failure",
     ):
+
         target_id = req_id
         if target_id is None:
             stage_queue = self._stage_active_req_ids.get(stage)
@@ -462,7 +477,7 @@ class VerifiedLifecycleOwner:
     def record_timeout(
         self,
         stage: str,
-        reservation_tokens: int,
+        reservation_tokens: int = 0,
         req_id: str | None = None,
         reason: str = "timeout",
     ):
@@ -506,3 +521,31 @@ class VerifiedLifecycleOwner:
                 raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
             if res.verdict.kind == VerdictKind.REJECTED:
                 raise BudgetExhausted(res.verdict.reason or "REJECTED")
+
+    def record_validation(self, req_id: str, outcome: str) -> TransitionVerdict:
+        """Record validation outcome for an attempt. Leaves accounting invariants unchanged."""
+        self._refresh_state()
+        ev = {
+            "kind": "ValidationRecorded",
+            "req_id": req_id,
+            "outcome": outcome,
+        }
+        if self.mode == LifecycleMode.SHADOW:
+            self.store.append(
+                "verified_lifecycle_ledger",
+                "verified.validation_recorded",
+                {"req_id": req_id, "outcome": outcome, "run_id": self.run_id},
+            )
+            try:
+                self._apply_bridge(ev, "verified.validation_recorded_shadow")
+            except Exception as shadow_err:
+                logger.warning("Shadow bridge error recording validation: %s", shadow_err)
+            return TransitionVerdict(kind=VerdictKind.ACCEPTED)
+        else:
+            res = self._apply_bridge(ev, "verified.validation_recorded")
+            if res.verdict.kind == VerdictKind.CONFLICT_FAULT:
+                raise RuntimeError(res.verdict.reason or "CONFLICT_FAULT")
+            if res.verdict.kind == VerdictKind.REJECTED:
+                raise BudgetExhausted(res.verdict.reason or "REJECTED")
+            return res.verdict
+

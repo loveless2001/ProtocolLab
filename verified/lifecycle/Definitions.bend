@@ -211,3 +211,36 @@ def fault_is(fault: Maybe<&2, String>, expected: String) -> Bool:
       False{}
     case Some{reason}:
       String.eq(reason, expected)
+
+def result_verdict(res: T.TransitionResult) -> T.TransitionVerdict:
+  match res:
+    case T.TransResult{next_state, verdict}:
+      verdict
+
+def verdict_emits_permit(v: T.TransitionVerdict) -> Bool:
+  match v:
+    case T.Accepted{intent}:
+      match intent:
+        case None{}:
+          False{}
+        case Some{i}:
+          True{}
+    case T.DuplicateNoop{}:
+      False{}
+    case T.Rejected{reason}:
+      False{}
+    case T.ConflictFault{reason}:
+      False{}
+
+def accounting_equal(a: T.AccountingSummary, b: T.AccountingSummary) -> Bool:
+  match a:
+    case T.AccSummary{a_spent, a_held, a_comm, a_stages, a_fault}:
+      match b:
+        case T.AccSummary{b_spent, b_held, b_comm, b_stages, b_fault}:
+          Bool.and(
+            Nat.is_eq(a_spent, b_spent),
+            Bool.and(
+              Nat.is_eq(a_held, b_held),
+              Nat.is_eq(a_comm, b_comm)
+            )
+          )

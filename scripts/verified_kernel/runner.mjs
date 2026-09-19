@@ -235,6 +235,9 @@ export function eventToBend(ev) {
   if (kind === "TimeoutUnknown" || kind === "EvTimeoutUnknown") {
     return { $: "EvTimeoutUnknown", req_id: ev.req_id, reason: ev.reason };
   }
+  if (kind === "ValidationRecorded" || kind === "EvValidationRecorded") {
+    return { $: "EvValidationRecorded", req_id: ev.req_id, outcome: ev.outcome || "ACCEPTED" };
+  }
   throw new Error(`Unknown lifecycle event kind: ${JSON.stringify(ev)}`);
 }
 
