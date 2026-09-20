@@ -136,3 +136,22 @@ def test_stage_3_task_completing_act_sequence(runtime, monkeypatch):
     assert s3.dispatched_actions >= 1
     assert s3.acknowledged_actions >= 1
     assert s3.effective_actions >= 1
+
+
+def test_stage_3_premature_finish_fails_even_after_progress(runtime, monkeypatch):
+    """A premature FINISH cannot pass because an earlier action met the progress threshold."""
+    port, config = _make_mock_port(
+        runtime,
+        [
+            '{"kind": "ACT", "operation": "INSPECT"}',
+            '{"kind": "FINISH"}',
+        ],
+        monkeypatch,
+    )
+    harness = ActorDiagnosticHarness()
+    s3 = harness.run_stage_3_closed_loop(config, runtime, max_turns=2, port=port)
+
+    assert s3.task_progress_rate == 0.5
+    assert not s3.task_completed
+    assert s3.status == "FAIL"
+    assert s3.stop_rule_triggered == "PREMATURE_FINISH: INSUFFICIENT_EVIDENCE"

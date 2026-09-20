@@ -20,7 +20,7 @@ from protocollab.actor import (
     proposal_text,
 )
 from protocollab.actor.diagnostic_config import DiagnosticThresholds  # noqa: F401
-from protocollab.contracts import MUTATIONS, canonical
+from protocollab.contracts import MUTATIONS, canonical, digest
 
 
 @dataclass
@@ -227,6 +227,46 @@ def evaluate_decision_correctness(proposal: ActorProposal, packet: dict[str, Any
     return False, "NON_PROGRESS_KIND"
 
 
+def _diagnostic_inspection(
+    resource: str,
+    artifact: str,
+    health: str,
+    logical_tick: int,
+    seq: int,
+    suffix: str,
+) -> dict[str, Any]:
+    """Construct schema-faithful synthetic public evidence for a Stage 2 case."""
+    command_id = f"diagnostic-command-{suffix}"
+    raw_packet = {
+        "causal_command_id": command_id,
+        "domain": {"artifact": artifact, "health": health, "result_code": "OK"},
+        "event_id": f"diagnostic-receipt-{suffix}",
+        "logical_tick": logical_tick,
+        "note": "",
+        "resource_id": resource,
+        "sequence": seq,
+        "transport_status": "ACKNOWLEDGED",
+    }
+    return {
+        "schema_version": "0.1",
+        "kind": "observation.record",
+        "observation_id": f"diagnostic-observation-{suffix}",
+        "namespace": "diagnostic",
+        "resource_id": resource,
+        "source_principal_ref": "effect_sensor",
+        "causal_command_id": command_id,
+        "seq": seq,
+        "logical_tick": logical_tick,
+        "raw_hash": digest(raw_packet),
+        "normalizer_rev": "finite-domain/v1",
+        "input_symbol": "INSPECT",
+        "domain_output": f"INSPECT:{artifact}:{health}",
+        "note_ref": None,
+        "loss_flags": ["transport_metadata_excluded"],
+        "raw_packet": raw_packet,
+    }
+
+
 def build_state_decision_scenarios(runtime, condition="C0", scenario_version="v2"):
     packet = build_packet(runtime, condition)
     paused = deepcopy(packet)
@@ -268,20 +308,38 @@ def build_state_decision_scenarios(runtime, condition="C0", scenario_version="v2
 
     # Case 3: known_prerequisite — observation shows initial state BASE, SUBMIT_A is permitted
     prereq_packet = deepcopy(packet)
+    next_seq = packet.get("live_feedback", {}).get("next_cursor", 0) + 1
+    prereq_observation = _diagnostic_inspection(
+        resource, "BASE", "HEALTHY", logical_tick=0, seq=next_seq, suffix="prerequisite"
+    )
     prereq_packet["live_feedback"] = {
         **packet.get("live_feedback", {}),
-        "observations": [
-            {"input_symbol": "INSPECT", "domain_output": "INSPECT:BASE:HEALTHY"}
-        ],
+        "new_observations": [prereq_observation],
+        "next_cursor": next_seq,
     }
 
-    # Case 4: completion_evidence_sufficient — observation confirms target A is served
+    # Case 4: two authenticated readings confirm the target and satisfy the task's tick gap.
     completion_packet = deepcopy(packet)
+    artifact = packet.get("task", {}).get("artifact", "A")
+    health = packet.get("task", {}).get("health", "HEALTHY")
+    tick_gap = packet.get("task", {}).get("minimum_tick_gap", 2)
+    completion_observations = [
+        _diagnostic_inspection(
+            resource, artifact, health, logical_tick=0, seq=next_seq, suffix="completion-first"
+        ),
+        _diagnostic_inspection(
+            resource,
+            artifact,
+            health,
+            logical_tick=tick_gap,
+            seq=next_seq + 1,
+            suffix="completion-second",
+        ),
+    ]
     completion_packet["live_feedback"] = {
         **packet.get("live_feedback", {}),
-        "observations": [
-            {"input_symbol": "INSPECT", "domain_output": f"INSPECT:{packet.get('task', {}).get('artifact', 'A')}:HEALTHY"}
-        ],
+        "new_observations": completion_observations,
+        "next_cursor": next_seq + 1,
     }
 
     # Case 5: operation_revoked (paired with Case 3: same except SUBMIT_A revoked from permissions)

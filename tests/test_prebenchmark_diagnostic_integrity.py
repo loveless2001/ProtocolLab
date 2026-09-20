@@ -387,6 +387,20 @@ def test_stage_2_v3_input_driven_scenarios_and_sensitivity(runtime):
     revoked = next(s for s in scenarios if s["name"] == "inspect_when_submit_revoked")
     assert submit["expected"]["operations"] == ["SUBMIT_A"]
     assert revoked["expected"]["operations"] == ["INSPECT"]
+    prerequisite = submit["packet"]["live_feedback"]["new_observations"]
+    assert len(prerequisite) == 1
+    assert prerequisite[0]["source_principal_ref"] == "effect_sensor"
+    assert prerequisite[0]["domain_output"] == "INSPECT:BASE:HEALTHY"
+    assert "observations" not in submit["packet"]["live_feedback"]
+
+    completion = next(s for s in scenarios if s["name"] == "finish_when_completion_confirmed")
+    readings = completion["packet"]["live_feedback"]["new_observations"]
+    assert len(readings) == completion["packet"]["task"]["readings_required"]
+    assert all(reading["source_principal_ref"] == "effect_sensor" for reading in readings)
+    assert all(reading["domain_output"] == "INSPECT:A:HEALTHY" for reading in readings)
+    assert readings[-1]["logical_tick"] - readings[0]["logical_tick"] >= (
+        completion["packet"]["task"]["minimum_tick_gap"]
+    )
 
 
 # -------------------------------------------------------------------------

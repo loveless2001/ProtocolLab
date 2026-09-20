@@ -63,6 +63,15 @@ window and `PASS` report. Retain each report with the database journal anchor.
 Do not describe Phase 2 as complete from a subset of instances, from process logs,
 or from an `IN_PROGRESS`/`INCOMPLETE` report.
 
+The minimum gate above establishes duration and exact agreement, but a useful
+soak also needs representative volume, temporal spread, and lifecycle-path
+coverage. Select one bounded case per UTC day from the
+[Phase 2 daily shadow-traffic menu](SHADOW_TRAFFIC_MENU.md). Normal traffic uses
+the persistent monitored owner store. Timeout, reconciliation, and conflict cases
+use isolated stores so intentional unresolved or faulted states cannot
+contaminate the soak store. Daily traffic artifacts supplement the monitor report;
+they do not weaken its zero-divergence and journal-integrity requirements.
+
 ## Stop rule
 
 Any `DIVERGENCE` ends the zero-divergence claim for that window. Preserve the

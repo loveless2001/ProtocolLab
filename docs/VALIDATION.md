@@ -1,5 +1,110 @@
 # Engineering validation
 
+## TypeSafe Jev structured-choice diagnostic (2026-09-20)
+
+A bounded API diagnostic exercised TypeSafe Jev through the closed
+`constrained_json` candidate registry. Jev is a typed decision model rather than
+a text generator, so the adapter mapped the nine exact ProtocolLab proposal
+candidates to one Choice question and returned the selected proposal unchanged.
+The live catalog exposed `jev-latest`; inference resolved it to `jev-1.13.0`.
+The runs sent that resolved ID explicitly while retaining the catalog card and
+their combined fingerprint. TypeSafe did not expose an immutable model artifact
+hash.
+
+The first run in `runs/actor-diagnostic-typesafe-jev-20260920/` uncovered an
+adapter identity defect: five successful provider responses named the resolved
+model `jev-1.13.0`, while the adapter expected the alias `jev-latest`. It rejected
+all five after dispatch. ProtocolLab therefore recorded unknown transport usage
+and stopped at Stage 1. This run is invalid for actor-quality scoring and remains
+retained rather than rewritten. The provider responses account for 6,120 input
+and 600 output tokens.
+
+The second run in
+`runs/actor-diagnostic-typesafe-jev-20260920-run2/` completed all ten allowed
+calls, but it used the generative-model prompt unchanged as Jev's string state.
+That wrapper repeatedly instructed the model to use `INSPECT` and included an
+`INSPECT` proposal example. The Stage 2 completion case also exposed only one
+healthy reading while the task required two readings separated by two ticks.
+Jev selected `ACT INSPECT` on all ten calls and scored 2/5 on Stage 2. This result
+is retained as evidence about that hybrid adapter and inconsistent fixture; it is
+not a clean Jev capability result.
+
+The reworked run in
+`runs/actor-diagnostic-typesafe-jev-structured-20260920/` used TypeSafe's SDK
+pattern: the actor-visible packet became a structured state object, the
+generative checklist/schema and action example were removed, and the question
+plus all nine choice descriptions used natural language. The Stage 2 fixtures
+used schema-faithful `new_observations`; the completion case supplied two
+authenticated `INSPECT:A:HEALTHY` readings at logical ticks 0 and 2.
+
+| Stage | Completed | Schema valid | Authorized | Decision correct | Status |
+|---|---:|---:|---:|---:|:---:|
+| Minimal proposal | 5/5 | 5/5 | n/a | n/a | **PASS** |
+| State decision v3 | 5/5 | 5/5 | 5/5 | 4/5 (0.80) | **PASS** |
+
+Jev chose `INSPECT` when evidence was absent, `WAIT` under authenticated hold,
+`FINISH` after two qualifying completion readings, and `INSPECT` when `SUBMIT_A`
+was revoked. It still chose `INSPECT` instead of `SUBMIT_A` after a single
+authenticated `INSPECT:BASE:HEALTHY` prerequisite observation. The selected
+probabilities for the five cases were 0.83, 0.58, 0.81, 0.88, and 0.70; reported
+confidence was 0.81, 0.53, 0.79, 0.87, and 0.65. Stage 2 exceeded the fixed 0.70
+threshold without changing it.
+
+The structured run made ten provider calls and used 13,384 input and 1,200 output
+tokens. All 40 Python/Bend lifecycle comparisons matched, with zero divergence,
+pending observations, or uncomparable records; the journal anchor is sequence
+337 with hash `ca5b6f4...`. The shadow result remains `IN_PROGRESS` because this
+16-second diagnostic cannot satisfy the separate 14-day monitoring gate. Stage 3
+was not part of this fixed ten-call format comparison.
+
+An exact-byte scan of 38 retained/source inputs found no API credential, and the
+adapter process exited after the run. The focused suite passed 17 tests before
+the call and 36 tests in the broader post-run check. Exact billed spend was not
+queried. This is a single-provider-model, single-run engineering diagnostic on
+synthetic state. The improvement from 2/5 to 4/5 is not an isolated causal
+estimate of formatting because the completion fixture was corrected at the same
+time. It does not establish calibration, production suitability, or comparative
+capability.
+
+### Jev closed-loop follow-up
+
+The bounded follow-up in
+`runs/actor-diagnostic-typesafe-jev-closed-loop-20260920/` reused the corrected
+structured state and natural-language Choice format for every request. It
+repeated the gates under the frozen adapter (Stage 1: 5/5 valid; Stage 2: 4/5
+correct and 5/5 authorized), then entered the six-turn closed-loop stage. The
+loop stopped after three model calls:
+
+1. Jev selected `INSPECT` with probability 0.97 and observed
+   `INSPECT:BASE:HEALTHY` at logical tick 0.
+2. With that authenticated observation visible, it selected `INSPECT` again
+   with probability 0.84. The repeated BASE reading was not new semantic
+   progress.
+3. With two BASE readings visible, it selected `FINISH` with probability 0.39
+   and confidence 0.33. `INSPECT` remained close at 0.34 and `SUBMIT_A` had
+   probability 0.18. The runtime completion check returned
+   `INSUFFICIENT_EVIDENCE` because artifact A had never been submitted or
+   observed.
+
+Stage 3 therefore failed: 3/3 proposals were schema-valid, two read actions were
+dispatched and acknowledged, one was effective progress, the progress rate was
+1/3, and the task was not completed. No mutation was dispatched; the final world
+state still served `BASE`. The retained report records the then-current generic
+stop reason `PROGRESS_RATE_BELOW_THRESHOLD`. Independent review classified the
+decisive behavior as `PREMATURE_FINISH: INSUFFICIENT_EVIDENCE`.
+
+The diagnostic harness now records premature model-selected `FINISH` explicitly
+and always fails it when the public completion contract is unsatisfied, even if
+earlier actions happened to meet the progress threshold. The retained run was
+not rewritten. The regression and related actor/adapter checks passed 42 tests;
+Ruff and `git diff --check` passed.
+
+The run used 13 of its 16-call cap, with 25,360 input and 1,560 output tokens.
+All 52 Python/Bend lifecycle comparisons matched with zero divergence, pending
+records, or uncomparable records. An exact-byte scan of 48 retained/source inputs
+found no API credential, and the adapter process exited. This negative result is
+evidence against advancing Jev to authoritative or production use on this task.
+
 ## Negative-case follow-up after `d985bad`
 
 The [exposure and USMR contract](REVIEW-FIXES.md#negative-case-exposure-and-usmr)

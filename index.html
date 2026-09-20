@@ -1,0 +1,1039 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ProtocolLab is a governed runtime for learning and executing black-box deployment protocols through public I/O, with proof-checked lifecycle accounting and retained evidence.">
+  <title>ProtocolLab — Project status</title>
+  <style>
+    :root {
+      --ink: #132a2b;
+      --ink-soft: #405554;
+      --paper: #f3f0e7;
+      --paper-deep: #e9e4d7;
+      --card: #fbfaf5;
+      --line: #cfcabc;
+      --moss: #42685e;
+      --moss-dark: #254b44;
+      --orange: #e66f3c;
+      --orange-pale: #f6d8c8;
+      --yellow: #e9c95d;
+      --red: #a84e43;
+      --red-pale: #f4d9d3;
+      --green: #2e705d;
+      --green-pale: #d9e8df;
+      --shadow: 0 18px 60px rgba(19, 42, 43, 0.09);
+      --radius: 22px;
+      --max: 1180px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 88% 4%, rgba(230, 111, 60, 0.12), transparent 23rem),
+        linear-gradient(180deg, #f7f4ec 0, var(--paper) 36rem, #eeeade 100%);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      opacity: 0.16;
+      pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='88' height='88' viewBox='0 0 88 88'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.08'/%3E%3C/svg%3E");
+    }
+
+    a { color: inherit; }
+    button, input { font: inherit; }
+    button { color: inherit; }
+
+    .shell {
+      width: min(calc(100% - 40px), var(--max));
+      margin-inline: auto;
+    }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(247, 244, 236, 0.88);
+      border-bottom: 1px solid rgba(207, 202, 188, 0.75);
+      backdrop-filter: blur(18px);
+    }
+
+    .nav {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 26px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      text-decoration: none;
+      font-weight: 780;
+      letter-spacing: -0.03em;
+      font-size: 1.1rem;
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 31px;
+      height: 31px;
+      border: 2px solid var(--ink);
+      border-radius: 50%;
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+    }
+
+    .brand-mark::before {
+      inset: 6px;
+      background: var(--orange);
+    }
+
+    .brand-mark::after {
+      width: 7px;
+      height: 7px;
+      top: -3px;
+      right: 1px;
+      background: var(--paper);
+      border: 2px solid var(--ink);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 25px;
+      font-size: 0.88rem;
+      font-weight: 650;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      color: var(--ink-soft);
+    }
+
+    .nav-links a:hover { color: var(--orange); }
+
+    .nav-docs {
+      padding: 9px 14px;
+      color: var(--paper) !important;
+      background: var(--ink);
+      border-radius: 999px;
+    }
+
+    .hero {
+      position: relative;
+      padding: 92px 0 72px;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 480px;
+      height: 480px;
+      right: -190px;
+      top: 20px;
+      border: 1px solid rgba(66, 104, 94, 0.18);
+      border-radius: 50%;
+      box-shadow:
+        0 0 0 52px rgba(66, 104, 94, 0.04),
+        0 0 0 104px rgba(66, 104, 94, 0.03);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 22px;
+      color: var(--moss-dark);
+      font-size: 0.76rem;
+      font-weight: 800;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 26px;
+      height: 2px;
+      background: var(--orange);
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      max-width: 880px;
+      margin-bottom: 28px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(3.35rem, 7vw, 6.8rem);
+      line-height: 0.91;
+      letter-spacing: -0.065em;
+      font-weight: 500;
+    }
+
+    .hero-accent {
+      position: relative;
+      display: inline-block;
+      color: var(--orange);
+      white-space: nowrap;
+    }
+
+    .hero-accent::after {
+      content: "";
+      position: absolute;
+      left: 3%;
+      right: 0;
+      bottom: 0.01em;
+      height: 0.09em;
+      background: currentColor;
+      transform: rotate(-1.2deg);
+      opacity: 0.4;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.7fr);
+      gap: 70px;
+      align-items: end;
+    }
+
+    .lede {
+      max-width: 720px;
+      margin-bottom: 30px;
+      font-size: clamp(1.08rem, 2vw, 1.31rem);
+      color: var(--ink-soft);
+    }
+
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 48px;
+      padding: 0 19px;
+      border: 1px solid var(--ink);
+      border-radius: 999px;
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 750;
+      transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
+    }
+
+    .button:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(19,42,43,.12); }
+    .button.primary { color: var(--paper); background: var(--ink); }
+    .button.secondary { background: rgba(255,255,255,.36); }
+
+    .snapshot {
+      position: relative;
+      z-index: 1;
+      padding: 23px;
+      color: #f8f5ed;
+      background: var(--ink);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .snapshot::after {
+      content: "PL / 01";
+      position: absolute;
+      right: -10px;
+      bottom: -19px;
+      color: rgba(255,255,255,.05);
+      font-size: 4rem;
+      font-weight: 900;
+      letter-spacing: -0.08em;
+    }
+
+    .snapshot-label {
+      color: #b8cbc5;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .snapshot h2 {
+      margin: 9px 0 16px;
+      font-size: 1.48rem;
+      letter-spacing: -0.035em;
+    }
+
+    .snapshot p { margin: 0; color: #cedbd6; font-size: .9rem; }
+    .pulse {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      margin-right: 7px;
+      border-radius: 50%;
+      background: var(--yellow);
+      box-shadow: 0 0 0 5px rgba(233,201,93,.13);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      margin-bottom: 90px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .metric { padding: 28px 24px 27px; border-right: 1px solid var(--line); }
+    .metric:first-child { padding-left: 0; }
+    .metric:last-child { border-right: 0; }
+    .metric-value {
+      display: block;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(2.3rem, 4vw, 3.5rem);
+      line-height: 1;
+      letter-spacing: -.05em;
+    }
+    .metric-label { display: block; margin-top: 9px; color: var(--ink-soft); font-size: .82rem; }
+
+    section { padding: 84px 0; }
+    .section-rule { border-top: 1px solid var(--line); }
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(200px, .55fr) minmax(0, 1.45fr);
+      gap: 55px;
+      margin-bottom: 48px;
+    }
+
+    .kicker {
+      margin: 5px 0 0;
+      color: var(--orange);
+      font-size: .73rem;
+      font-weight: 850;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin-bottom: 18px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(2.25rem, 4.5vw, 4.25rem);
+      line-height: .98;
+      letter-spacing: -.05em;
+      font-weight: 500;
+    }
+
+    .section-intro { max-width: 760px; color: var(--ink-soft); font-size: 1.06rem; }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .principle {
+      min-height: 250px;
+      padding: 25px;
+      background: rgba(251,250,245,.72);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .principle-no {
+      display: inline-grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      margin-bottom: 45px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--orange);
+      font: 700 .75rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .principle h3 { margin-bottom: 8px; font-size: 1.2rem; letter-spacing: -.025em; }
+    .principle p { margin-bottom: 0; color: var(--ink-soft); font-size: .9rem; }
+
+    .architecture {
+      position: relative;
+      padding: 34px;
+      color: #edf2ed;
+      background: var(--ink);
+      border-radius: 30px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .architecture-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 23px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .arch-node {
+      position: relative;
+      min-height: 142px;
+      padding: 19px;
+      background: rgba(255,255,255,.055);
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 15px;
+    }
+
+    .arch-node:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -19px;
+      top: 50%;
+      color: var(--orange);
+      transform: translateY(-50%);
+      font-size: 1.15rem;
+    }
+
+    .arch-code { color: #9db8af; font: 700 .7rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .arch-node h3 { margin: 14px 0 7px; font-size: .96rem; }
+    .arch-node p { margin: 0; color: #b9c9c4; font-size: .76rem; line-height: 1.45; }
+    .architecture-note {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      position: relative;
+      z-index: 1;
+      margin-top: 28px;
+      padding-top: 22px;
+      border-top: 1px solid rgba(255,255,255,.12);
+      color: #b9c9c4;
+      font-size: .82rem;
+    }
+
+    .architecture-note strong { color: #fff; }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 18px;
+    }
+
+    .status-card {
+      padding: 27px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .status-card.featured { background: var(--moss-dark); color: #f3f2e9; border-color: var(--moss-dark); }
+    .status-top { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 32px; }
+    .status-step { color: var(--ink-soft); font: 750 .75rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .featured .status-step { color: #a9c4bb; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 27px;
+      padding: 0 11px;
+      border-radius: 999px;
+      background: var(--green-pale);
+      color: var(--green);
+      font-size: .69rem;
+      font-weight: 850;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .badge.progress { color: #684f09; background: #f6e8b5; }
+    .badge.blocked { color: var(--red); background: var(--red-pale); }
+    .badge.dark { color: #fbdf7f; background: rgba(233,201,93,.13); }
+
+    .status-card h3 { margin-bottom: 8px; font-size: 1.36rem; letter-spacing: -.03em; }
+    .status-card p { color: var(--ink-soft); font-size: .9rem; }
+    .featured p { color: #bed0ca; }
+    .progress-bar { height: 7px; margin: 22px 0 14px; background: rgba(255,255,255,.13); border-radius: 99px; overflow: hidden; }
+    .progress-bar > span { display: block; width: 1%; min-width: 7px; height: 100%; background: var(--yellow); border-radius: inherit; }
+    .micro { font-size: .76rem !important; }
+
+    .evidence-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .evidence-card { padding: 23px; background: rgba(251,250,245,.62); border: 1px solid var(--line); border-radius: 18px; }
+    .evidence-card strong { display: block; margin-bottom: 6px; font-size: 1.34rem; }
+    .evidence-card span { color: var(--ink-soft); font-size: .79rem; }
+
+    .model-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 18px;
+      padding: 5px;
+      width: max-content;
+      max-width: 100%;
+      background: var(--paper-deep);
+      border-radius: 999px;
+    }
+    .tab-button {
+      min-height: 37px;
+      padding: 0 16px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      cursor: pointer;
+      font-size: .79rem;
+      font-weight: 800;
+    }
+    .tab-button[aria-selected="true"] { color: #fff; background: var(--ink); }
+    .model-panel[hidden] { display: none; }
+
+    .jev-board {
+      display: grid;
+      grid-template-columns: .83fr 1.17fr;
+      gap: 18px;
+    }
+
+    .result-hero {
+      padding: 31px;
+      color: #f5efe6;
+      background: var(--red);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .result-hero .badge { margin-bottom: 55px; }
+    .result-hero h3 { margin-bottom: 12px; font-family: Georgia, serif; font-size: 2.65rem; line-height: .97; font-weight: 500; letter-spacing: -.045em; }
+    .result-hero p { color: #f6ddd6; }
+    .result-hero a { font-size: .82rem; font-weight: 800; }
+
+    .stages { display: grid; gap: 10px; }
+    .stage {
+      display: grid;
+      grid-template-columns: 54px 1fr auto;
+      gap: 16px;
+      align-items: center;
+      padding: 20px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+    .stage-num { color: var(--orange); font: 750 .76rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .stage h3 { margin: 0 0 4px; font-size: 1rem; }
+    .stage p { margin: 0; color: var(--ink-soft); font-size: .78rem; }
+
+    .call-trace {
+      margin-top: 18px;
+      padding: 26px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    .trace-title { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+    .trace-title h3 { margin: 0; font-size: 1.1rem; }
+    .trace-title span { color: var(--ink-soft); font-size: .75rem; }
+    .trace-line { display: grid; grid-template-columns: 80px 1fr 58px; gap: 15px; align-items: center; margin-top: 15px; }
+    .trace-call { font: 700 .74rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .trace-track { height: 29px; background: var(--paper-deep); border-radius: 6px; overflow: hidden; }
+    .trace-fill { display: flex; align-items: center; height: 100%; padding: 0 10px; color: #fff; background: var(--moss); font-size: .68rem; font-weight: 800; white-space: nowrap; }
+    .trace-fill.fail { background: var(--red); }
+    .trace-prob { text-align: right; color: var(--ink-soft); font-size: .76rem; }
+
+    .format-note {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      margin-top: 18px;
+      overflow: hidden;
+      background: var(--line);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+    .format-note div { padding: 18px; background: var(--card); }
+    .format-note strong { display: block; margin-bottom: 5px; font-size: .79rem; }
+    .format-note span { color: var(--ink-soft); font-size: .73rem; }
+
+    .run-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+    table { width: 100%; border-collapse: collapse; background: var(--card); font-size: .79rem; }
+    th, td { padding: 15px 17px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    th { color: var(--ink-soft); background: var(--paper-deep); font-size: .69rem; letter-spacing: .06em; text-transform: uppercase; }
+    td:not(:first-child), th:not(:first-child) { text-align: right; }
+    tr:last-child td { border-bottom: 0; }
+    .table-good { color: var(--green); font-weight: 800; }
+    .table-bad { color: var(--red); font-weight: 800; }
+    .model-footnote { margin: 16px 2px 0; color: var(--ink-soft); font-size: .78rem; }
+
+    .traffic-layout { display: grid; grid-template-columns: 290px 1fr; gap: 28px; align-items: start; }
+    .today-card {
+      position: sticky;
+      top: 95px;
+      padding: 25px;
+      color: #fff;
+      background: var(--orange);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .today-card .label { font-size: .69rem; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; opacity: .82; }
+    .today-card h3 { margin: 18px 0 11px; font-family: Georgia, serif; font-size: 2rem; line-height: 1; font-weight: 500; letter-spacing: -.035em; }
+    .today-card p { font-size: .83rem; opacity: .9; }
+    .today-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+    .today-meta span { padding: 6px 9px; border: 1px solid rgba(255,255,255,.4); border-radius: 999px; font-size: .66rem; font-weight: 750; }
+
+    .traffic-list { display: grid; gap: 8px; }
+    .traffic-item {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 47px 1fr auto;
+      gap: 15px;
+      align-items: center;
+      padding: 16px 18px;
+      text-align: left;
+      background: rgba(251,250,245,.68);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      cursor: pointer;
+      transition: border 150ms ease, background 150ms ease, transform 150ms ease;
+    }
+    .traffic-item:hover, .traffic-item.active { transform: translateX(3px); border-color: var(--orange); background: var(--card); }
+    .traffic-day { color: var(--orange); font: 750 .71rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .traffic-copy strong { display: block; font-size: .88rem; }
+    .traffic-copy span { display: block; margin-top: 3px; color: var(--ink-soft); font-size: .72rem; }
+    .store-tag { padding: 5px 8px; border-radius: 999px; color: var(--green); background: var(--green-pale); font-size: .62rem; font-weight: 850; text-transform: uppercase; }
+    .store-tag.isolated { color: var(--red); background: var(--red-pale); }
+
+    .limits {
+      padding: 64px 0;
+      color: #eef3ee;
+      background: var(--ink);
+    }
+    .limits .section-head { margin-bottom: 35px; }
+    .limits .section-intro { color: #b8cac4; }
+    .limits-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .limit { padding: 20px; border: 1px solid rgba(255,255,255,.15); border-radius: 16px; }
+    .limit strong { display: block; margin-bottom: 8px; color: var(--yellow); font-size: .8rem; }
+    .limit span { color: #b8cac4; font-size: .76rem; }
+
+    .evidence-links { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .evidence-link {
+      display: flex;
+      min-height: 125px;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 20px;
+      text-decoration: none;
+      background: rgba(251,250,245,.6);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      transition: background 150ms ease, transform 150ms ease;
+    }
+    .evidence-link:hover { background: var(--card); transform: translateY(-3px); }
+    .evidence-link strong { font-size: .91rem; }
+    .evidence-link span { color: var(--orange); font-size: .74rem; font-weight: 800; }
+
+    footer { padding: 35px 0 50px; border-top: 1px solid var(--line); }
+    .footer-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; color: var(--ink-soft); font-size: .75rem; }
+    .footer-row strong { color: var(--ink); }
+
+    @media (max-width: 900px) {
+      .nav-links a:not(.nav-docs) { display: none; }
+      .hero-grid, .section-head, .jev-board, .status-grid, .traffic-layout { grid-template-columns: 1fr; }
+      .snapshot { max-width: 520px; }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .metric:nth-child(2) { border-right: 0; }
+      .metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .metric:nth-child(3) { padding-left: 0; }
+      .principles, .evidence-row, .evidence-links { grid-template-columns: repeat(2, 1fr); }
+      .architecture-grid { grid-template-columns: 1fr 1fr; }
+      .arch-node:not(:last-child)::after { display: none; }
+      .limits-grid { grid-template-columns: repeat(2, 1fr); }
+      .today-card { position: static; }
+    }
+
+    @media (max-width: 600px) {
+      .shell { width: min(calc(100% - 26px), var(--max)); }
+      .hero { padding-top: 63px; }
+      h1 { font-size: clamp(3rem, 16vw, 4.3rem); }
+      section { padding: 62px 0; }
+      .metrics, .principles, .evidence-row, .evidence-links, .limits-grid, .format-note, .architecture-grid { grid-template-columns: 1fr; }
+      .metric { padding-left: 0; border-right: 0; border-bottom: 1px solid var(--line); }
+      .metric:last-child { border-bottom: 0; }
+      .architecture { padding: 22px; }
+      .architecture-note, .footer-row { flex-direction: column; align-items: flex-start; }
+      .model-tabs { width: 100%; overflow-x: auto; }
+      .tab-button { flex: 0 0 auto; }
+      .stage { grid-template-columns: 40px 1fr; }
+      .stage .badge { grid-column: 2; justify-self: start; }
+      .trace-line { grid-template-columns: 60px 1fr 40px; }
+      .traffic-item { grid-template-columns: 38px 1fr; }
+      .store-tag { grid-column: 2; justify-self: start; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav shell" aria-label="Primary navigation">
+      <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span>ProtocolLab</a>
+      <div class="nav-links">
+        <a href="#system">System</a>
+        <a href="#progress">Progress</a>
+        <a href="#models">Model calls</a>
+        <a href="#traffic">Traffic plan</a>
+        <a class="nav-docs" href="README.md">Read the docs ↗</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="top">
+    <div class="hero shell">
+      <p class="eyebrow">Protocol learning under explicit authority</p>
+      <h1>Learn the protocol.<br><span class="hero-accent">Keep the boundary.</span></h1>
+      <div class="hero-grid">
+        <div>
+          <p class="lede">ProtocolLab learns finite black-box deployment protocols from public I/O, then executes bounded plans through signed controls, durable accounting, and independent evidence. The model may propose. The runtime decides what can happen.</p>
+          <div class="hero-actions">
+            <a class="button primary" href="#progress">See current progress <span aria-hidden="true">↓</span></a>
+            <a class="button secondary" href="ProtocolLab_Design_Spec_v0.1_vi.md">Canonical design ↗</a>
+          </div>
+        </div>
+        <aside class="snapshot" aria-label="Status snapshot">
+          <span class="snapshot-label">Evidence snapshot · 20 Sep 2026</span>
+          <h2><span class="pulse" aria-hidden="true"></span>Phase 2 in progress</h2>
+          <p>40 of 40 persistent-store lifecycle comparisons match. The required 14-day observation window is still open.</p>
+        </aside>
+      </div>
+    </div>
+
+    <div class="metrics shell" aria-label="Project metrics">
+      <div class="metric"><span class="metric-value">290</span><span class="metric-label">full-suite tests passed at Phase 1 validation</span></div>
+      <div class="metric"><span class="metric-value">14/14</span><span class="metric-label">lifecycle mutations caught by proof checks</span></div>
+      <div class="metric"><span class="metric-value">52/52</span><span class="metric-label">Jev-run Python/Bend comparisons matched</span></div>
+      <div class="metric"><span class="metric-value">0</span><span class="metric-label">research hypotheses claimed as confirmed</span></div>
+    </div>
+
+    <section id="system" class="section-rule">
+      <div class="shell">
+        <div class="section-head">
+          <p class="kicker">01 / The system</p>
+          <div>
+            <h2>A learning runtime with a hard separation of powers.</h2>
+            <p class="section-intro">Observations, beliefs, learned models, plans, authority, commitments, and actual effects remain distinct. An acknowledgement is never counted as deployment success; completion requires public evidence and privileged scoring.</p>
+          </div>
+        </div>
+
+        <div class="principles">
+          <article class="principle">
+            <span class="principle-no">01</span>
+            <h3>Learn from public behavior</h3>
+            <p>A budgeted L* learner infers a finite Mealy machine from resettable replica I/O. Admission means consistent with tested traces, never proven world truth.</p>
+          </article>
+          <article class="principle">
+            <span class="principle-no">02</span>
+            <h3>Act through authority</h3>
+            <p>Every mutation crosses signed scope, epoch, budget, dispatch, and lifecycle checks. Models cannot write policy, credentials, evidence, or the environment.</p>
+          </article>
+          <article class="principle">
+            <span class="principle-no">03</span>
+            <h3>Retain what happened</h3>
+            <p>Runs keep source locks, journals, receipts, model artifacts, predictions, corrections, and replayable scoring evidence—even when the result is negative.</p>
+          </article>
+        </div>
+
+        <div class="architecture" style="margin-top:18px" aria-label="ProtocolLab runtime flow">
+          <div class="architecture-grid">
+            <article class="arch-node"><span class="arch-code">INPUT</span><h3>Public I/O</h3><p>Authenticated observations and independent sensor readings.</p></article>
+            <article class="arch-node"><span class="arch-code">INFER</span><h3>Belief + learner</h3><p>State sets, predictions, counterexamples, admitted models.</p></article>
+            <article class="arch-node"><span class="arch-code">PROPOSE</span><h3>Actor / planner</h3><p>Native or frozen model proposes one bounded action.</p></article>
+            <article class="arch-node"><span class="arch-code">GATE</span><h3>Broker + lifecycle</h3><p>Authority, accounting, dispatch, evidence, replay guards.</p></article>
+            <article class="arch-node"><span class="arch-code">EFFECT</span><h3>Environment</h3><p>Actual command application, receipts, and later scoring.</p></article>
+          </div>
+          <div class="architecture-note">
+            <span><strong>Independent monitor:</strong> journal + dispatch + receipt stream</span>
+            <span><strong>Current lifecycle mode:</strong> Python authoritative · Bend shadow observer</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="progress" class="section-rule">
+      <div class="shell">
+        <div class="section-head">
+          <p class="kicker">02 / Current progress</p>
+          <div>
+            <h2>The kernel is merged. The observation gate is still running.</h2>
+            <p class="section-intro">Phase 1 established the implementation and proof boundary. Phase 2 asks a different question: does the Bend observer agree with the active Python lifecycle across time, traffic, restarts, and faults?</p>
+          </div>
+        </div>
+
+        <div class="status-grid">
+          <article class="status-card">
+            <div class="status-top"><span class="status-step">PHASE 01</span><span class="badge">Complete</span></div>
+            <h3>Verified lifecycle kernel</h3>
+            <p>Bend 2.0.16 core, Python bridge, durable owner, proof checks, mutation analysis, restart and concurrency coverage merged to <code>main</code>.</p>
+            <div class="evidence-row">
+              <div class="evidence-card"><strong>290</strong><span>tests passed</span></div>
+              <div class="evidence-card"><strong>14</strong><span>declared proof laws</span></div>
+              <div class="evidence-card"><strong>14/14</strong><span>mutations caught</span></div>
+            </div>
+          </article>
+
+          <article class="status-card featured">
+            <div class="status-top"><span class="status-step">PHASE 02</span><span class="badge dark">In progress</span></div>
+            <h3>Persistent shadow observation</h3>
+            <p>Started 20 September at 05:07 UTC. Earliest eligible completion: <strong>4 October 2026 at 05:07 UTC</strong>, provided coverage and integrity gates also pass.</p>
+            <div class="progress-bar" aria-label="Monitoring window opened; less than one of fourteen days elapsed"><span></span></div>
+            <p class="micro">39m 31s snapshot: 40 matches · 0 divergence · 0 pending · 0 uncomparable</p>
+          </article>
+        </div>
+
+        <div class="evidence-row">
+          <article class="status-card">
+            <div class="status-top"><span class="status-step">NEXT GATE</span><span class="badge blocked">Not eligible</span></div>
+            <h3>Authoritative Bend mode</h3>
+            <p>Promotion remains blocked until every in-scope store satisfies duration, volume, temporal spread, lifecycle-path coverage, journal integrity, and zero divergence.</p>
+          </article>
+          <article class="status-card">
+            <div class="status-top"><span class="status-step">RUNTIME</span><span class="badge">Ready</span></div>
+            <h3>Native control</h3>
+            <p>The C3 native path completed a replayable smoke run with 10/10 predicted transitions, no policy violations, and zero model calls.</p>
+          </article>
+          <article class="status-card">
+            <div class="status-top"><span class="status-step">RESEARCH</span><span class="badge progress">Unrun</span></div>
+            <h3>H1–H5 study claims</h3>
+            <p>Engineering and model diagnostics do not establish structural adaptation, behavioral model use, correction quality, boundary stability, or LLM contribution.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="models" class="section-rule">
+      <div class="shell">
+        <div class="section-head">
+          <p class="kicker">03 / Model calls</p>
+          <div>
+            <h2>Model output is measured at the decision boundary.</h2>
+            <p class="section-intro">The diagnostics separate valid formatting, authorized selection, effective progress, and task completion. A provider response can pass the first two and still fail the closed loop.</p>
+          </div>
+        </div>
+
+        <div class="model-tabs" role="tablist" aria-label="Model results">
+          <button class="tab-button" role="tab" id="tab-jev" aria-controls="panel-jev" aria-selected="true">TypeSafe Jev</button>
+          <button class="tab-button" role="tab" id="tab-qwen" aria-controls="panel-qwen" aria-selected="false">Qwen3.5-4B</button>
+          <button class="tab-button" role="tab" id="tab-native" aria-controls="panel-native" aria-selected="false">Native C3</button>
+        </div>
+
+        <div class="model-panel" id="panel-jev" role="tabpanel" aria-labelledby="tab-jev">
+          <div class="jev-board">
+            <article class="result-hero">
+              <span class="badge blocked">Closed loop · fail</span>
+              <h3>Correct shape.<br>Wrong stopping point.</h3>
+              <p>Jev passed schema and state-decision gates, then inspected BASE twice and selected FINISH before artifact A was submitted. Completion evidence was insufficient.</p>
+              <a href="runs/actor-diagnostic-typesafe-jev-closed-loop-20260920/result-summary.json">Open retained summary ↗</a>
+            </article>
+
+            <div class="stages">
+              <article class="stage"><span class="stage-num">S1</span><div><h3>Minimal proposal</h3><p>5/5 schema-valid choices</p></div><span class="badge">Pass</span></article>
+              <article class="stage"><span class="stage-num">S2</span><div><h3>State decision</h3><p>4/5 correct · 5/5 authorized</p></div><span class="badge">Pass</span></article>
+              <article class="stage"><span class="stage-num">S3</span><div><h3>Closed loop</h3><p>1/3 effective progress · task incomplete</p></div><span class="badge blocked">Fail</span></article>
+              <article class="stage"><span class="stage-num">L/C</span><div><h3>Lifecycle agreement</h3><p>52/52 Python/Bend matches</p></div><span class="badge">Match</span></article>
+            </div>
+          </div>
+
+          <div class="call-trace">
+            <div class="trace-title"><h3>Closed-loop decision trace</h3><span>Jev 1.13.0 · calls 11–13</span></div>
+            <div class="trace-line"><span class="trace-call">CALL 11</span><div class="trace-track"><span class="trace-fill" style="width:97%">INSPECT</span></div><span class="trace-prob">0.97</span></div>
+            <div class="trace-line"><span class="trace-call">CALL 12</span><div class="trace-track"><span class="trace-fill" style="width:84%">INSPECT</span></div><span class="trace-prob">0.84</span></div>
+            <div class="trace-line"><span class="trace-call">CALL 13</span><div class="trace-track"><span class="trace-fill fail" style="width:39%">FINISH</span></div><span class="trace-prob">0.39</span></div>
+          </div>
+
+          <div class="format-note">
+            <div><strong>State</strong><span>Structured actor-visible object</span></div>
+            <div><strong>Question + choices</strong><span>Natural-language typed Choice descriptions</span></div>
+            <div><strong>Usage</strong><span>13 calls · 25,360 input · 1,560 output tokens</span></div>
+          </div>
+          <p class="model-footnote">Verdict: useful bounded diagnostic, evidence against authoritative or production use on this task. Exact billed spend was not queried. One model, one synthetic environment, one retained run.</p>
+        </div>
+
+        <div class="model-panel" id="panel-qwen" role="tabpanel" aria-labelledby="tab-qwen" hidden>
+          <div class="run-table-wrap">
+            <table>
+              <thead><tr><th>Local Qwen run</th><th>Forwarded calls</th><th>Valid proposals</th><th>Schema rejections</th><th>Eligible completion</th><th>Audit</th></tr></thead>
+              <tbody>
+                <tr><td>Baseline · 15 Sep</td><td>45</td><td>10</td><td>35</td><td class="table-bad">0/4</td><td class="table-good">Match</td></tr>
+                <tr><td>Thinking 256 · 17 Sep</td><td>43</td><td>0</td><td>43</td><td class="table-bad">0/4</td><td class="table-good">Match</td></tr>
+                <tr><td>Thinking 2048 · 17 Sep</td><td>48</td><td>0</td><td>48</td><td class="table-bad">0/4</td><td class="table-good">Match</td></tr>
+                <tr><td>Repaired · 18 Sep</td><td>38</td><td>10</td><td>1</td><td class="table-bad">0/4</td><td class="table-good">Match</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="evidence-row">
+            <article class="evidence-card"><strong>0 paid</strong><span>All four runs used the local frozen Qwen3.5-4B Q4_K_M checkpoint.</span></article>
+            <article class="evidence-card"><strong>Safe fallback</strong><span>Malformed or incomplete outputs were rejected; the runtime fell back to WAIT.</span></article>
+            <article class="evidence-card"><strong>Formatting ≠ completion</strong><span>The repaired path reduced schema rejection, but eligible tasks still completed 0/4.</span></article>
+          </div>
+          <p class="model-footnote">A later staged actor diagnostic passed its then-current three gates through repeated INSPECT actions. These are engineering smoke results on one locked topology, not a capability comparison or production qualification.</p>
+        </div>
+
+        <div class="model-panel" id="panel-native" role="tabpanel" aria-labelledby="tab-native" hidden>
+          <div class="jev-board">
+            <article class="result-hero" style="background:var(--green)">
+              <span class="badge">Replay verified</span>
+              <h3>10 of 10 predicted transitions.</h3>
+              <p>The native C3/G3/Track F smoke run finished ACTIVE / SUCCESS with zero policy violations and zero false confirmations.</p>
+              <a href="artifacts/prebenchmark/fresh-native-bundle-verification.json">Open verification ↗</a>
+            </article>
+            <div class="stages">
+              <article class="stage"><span class="stage-num">I/O</span><div><h3>Learning budget</h3><p>9,578 learning symbols · 308 admission symbols</p></div><span class="badge">Within cap</span></article>
+              <article class="stage"><span class="stage-num">RST</span><div><h3>Replica resets</h3><p>1,517 under the declared calibrated 2,000 cap</p></div><span class="badge">Within cap</span></article>
+              <article class="stage"><span class="stage-num">LLM</span><div><h3>Model dependency</h3><p>No API or local model calls</p></div><span class="badge">0 calls</span></article>
+              <article class="stage"><span class="stage-num">RPL</span><div><h3>Independent replay</h3><p>Metrics recomputed from retained simulator effects</p></div><span class="badge">Match</span></article>
+            </div>
+          </div>
+          <p class="model-footnote">This is an engineering smoke measurement. It does not establish the proposed H1–H5 research claims.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="traffic" class="section-rule">
+      <div class="shell">
+        <div class="section-head">
+          <p class="kicker">04 / Daily traffic</p>
+          <div>
+            <h2>One bounded case each day. Evidence retained every time.</h2>
+            <p class="section-intro">The 14-day window needs representative volume, temporal spread, and lifecycle-path coverage. Select a row to see its default batch and store isolation rule.</p>
+          </div>
+        </div>
+
+        <div class="traffic-layout">
+          <aside class="today-card" aria-live="polite">
+            <span class="label" id="case-label">Suggested day 1 case</span>
+            <h3 id="case-name">Normal success</h3>
+            <p id="case-description">Successful requests with exact usage settlement and accepted validation across enabled stages.</p>
+            <div class="today-meta"><span id="case-batch">60 requests</span><span id="case-store">Soak store</span></div>
+          </aside>
+
+          <div class="traffic-list" id="traffic-list">
+            <button class="traffic-item active" data-day="1" data-name="Normal success" data-description="Successful requests with exact usage settlement and accepted validation across enabled stages." data-batch="60 requests" data-store="Soak store"><span class="traffic-day">D01</span><span class="traffic-copy"><strong>normal-success</strong><span>Common path · reserve through validation</span></span><span class="store-tag">Soak</span></button>
+            <button class="traffic-item" data-day="2" data-name="Validation rejection" data-description="Settle real transport usage, then reject a malformed or unregistered proposal without changing accounting." data-batch="30 requests" data-store="Soak store"><span class="traffic-day">D02</span><span class="traffic-copy"><strong>validation-rejection</strong><span>Rejected output after successful accounting</span></span><span class="store-tag">Soak</span></button>
+            <button class="traffic-item" data-day="3" data-name="Exact duplicate" data-description="Replay identical lifecycle events and verify DuplicateNoop with unchanged totals." data-batch="25 request pairs" data-store="Soak store"><span class="traffic-day">D03</span><span class="traffic-copy"><strong>exact-duplicate</strong><span>Idempotency and stable totals</span></span><span class="store-tag">Soak</span></button>
+            <button class="traffic-item" data-day="4" data-name="Normal success" data-description="Repeat the common path on a separate day to establish temporal coverage." data-batch="60 requests" data-store="Soak store"><span class="traffic-day">D04</span><span class="traffic-copy"><strong>normal-success</strong><span>Temporal repeat of common path</span></span><span class="store-tag">Soak</span></button>
+            <button class="traffic-item" data-day="5" data-name="Concurrent batch" data-description="Overlap independent requests across stages and complete them out of reservation order." data-batch="64 requests · concurrency 4" data-store="Soak store"><span class="traffic-day">D05</span><span class="traffic-copy"><strong>concurrent-batch</strong><span>Isolation and out-of-order completion</span></span><span class="store-tag">Soak</span></button>
+            <button class="traffic-item" data-day="6" data-name="Restart recovery" data-description="Stop after durable shadow enqueue, reopen the owner, drain the queue, and complete the requests." data-batch="10 recoveries" data-store="Controlled soak store"><span class="traffic-day">D06</span><span class="traffic-copy"><strong>restart-recovery</strong><span>Durability and reconstruction</span></span><span class="store-tag">Controlled</span></button>
+            <button class="traffic-item" data-day="7" data-name="Provider boundary" data-description="Exercise real serialization, timing, usage receipts, and response-boundary integration." data-batch="5 local · max 2 paid" data-store="Soak store"><span class="traffic-day">D07</span><span class="traffic-copy"><strong>provider-boundary</strong><span>Local port plus bounded API sample</span></span><span class="store-tag">Soak</span></button>
+            <button class="traffic-item" data-day="8" data-name="Normal success" data-description="Repeat the common path on a third separate day." data-batch="60 requests" data-store="Soak store"><span class="traffic-day">D08</span><span class="traffic-copy"><strong>normal-success</strong><span>Temporal repeat of common path</span></span><span class="store-tag">Soak</span></button>
+            <button class="traffic-item" data-day="9" data-name="Budget rejection" data-description="Exceed a declared call or token limit and verify rejection before dispatch or charge." data-batch="30 attempts" data-store="Soak store"><span class="traffic-day">D09</span><span class="traffic-copy"><strong>budget-rejection</strong><span>No dispatch and no charge</span></span><span class="store-tag">Soak</span></button>
+            <button class="traffic-item" data-day="10" data-name="Proven not sent" data-description="Fail before bytes can cross the provider boundary and release the reservation using retained proof." data-batch="20 requests" data-store="Isolated store"><span class="traffic-day">D10</span><span class="traffic-copy"><strong>proven-not-sent</strong><span>Conclusive failure and release</span></span><span class="store-tag isolated">Isolated</span></button>
+            <button class="traffic-item" data-day="11" data-name="Timeout unknown" data-description="Time out after dispatch may have occurred and preserve the charge hold rather than claim conclusive failure." data-batch="10 requests" data-store="Isolated store"><span class="traffic-day">D11</span><span class="traffic-copy"><strong>timeout-unknown</strong><span>Unknown outcome and retained hold</span></span><span class="store-tag isolated">Isolated</span></button>
+            <button class="traffic-item" data-day="12" data-name="Late reconciliation" data-description="Deliver a provider receipt after an earlier timeout and reconcile its usage exactly once." data-batch="10 timeout / receipt pairs" data-store="Isolated store"><span class="traffic-day">D12</span><span class="traffic-copy"><strong>late-reconciliation</strong><span>Unknown-to-settled transition</span></span><span class="store-tag isolated">Isolated</span></button>
+            <button class="traffic-item" data-day="13" data-name="Provider + conflict" data-description="Repeat the provider boundary sample; run identity-conflict quarantine separately in a disposable store." data-batch="5 local · max 2 paid · 5 conflicts" data-store="Soak + disposable stores"><span class="traffic-day">D13</span><span class="traffic-copy"><strong>provider-boundary + conflict-quarantine</strong><span>Transport repeat and fault latching</span></span><span class="store-tag isolated">Split stores</span></button>
+            <button class="traffic-item" data-day="14" data-name="Normal success + report" data-description="Complete the fourth common-path day, then produce the final gate report against every in-scope store." data-batch="60 requests + report" data-store="Soak store"><span class="traffic-day">D14</span><span class="traffic-copy"><strong>normal-success + final report</strong><span>Close the window only if every gate passes</span></span><span class="store-tag">Soak</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="limits">
+      <div class="shell">
+        <div class="section-head">
+          <p class="kicker">05 / Claim boundary</p>
+          <div>
+            <h2>What the evidence does—and does not—say.</h2>
+            <p class="section-intro">ProtocolLab reports operational agreement, formatting behavior, and bounded task outcomes at their measured scope. It does not turn those observations into broader capability claims.</p>
+          </div>
+        </div>
+        <div class="limits-grid">
+          <div class="limit"><strong>Proof scope</strong><span>The Bend laws cover the encoded lifecycle semantics and declared traces, within the pinned toolchain and trust boundary.</span></div>
+          <div class="limit"><strong>Shadow scope</strong><span>Zero divergence so far is a partial-window observation. It is not a completed 14-day gate.</span></div>
+          <div class="limit"><strong>Model scope</strong><span>Jev and Qwen runs are bounded engineering diagnostics on synthetic or locked environments.</span></div>
+          <div class="limit"><strong>Research scope</strong><span>No confirmatory study has established H1–H5, general capability, calibration, or production suitability.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="evidence">
+      <div class="shell">
+        <div class="section-head">
+          <p class="kicker">06 / Evidence index</p>
+          <div><h2>Follow the result to its retained record.</h2></div>
+        </div>
+        <div class="evidence-links">
+          <a class="evidence-link" href="docs/VALIDATION.md"><strong>Engineering validation and model runs</strong><span>VALIDATION.md ↗</span></a>
+          <a class="evidence-link" href="docs/bend-migration/MIGRATION_REPORT.md"><strong>Verified lifecycle migration report</strong><span>MIGRATION_REPORT.md ↗</span></a>
+          <a class="evidence-link" href="docs/bend-migration/TRUST_BOUNDARY.md"><strong>Formal proof and trust boundary</strong><span>TRUST_BOUNDARY.md ↗</span></a>
+          <a class="evidence-link" href="docs/bend-migration/SHADOW_MONITORING.md"><strong>Phase 2 gate and monitor contract</strong><span>SHADOW_MONITORING.md ↗</span></a>
+          <a class="evidence-link" href="docs/bend-migration/SHADOW_TRAFFIC_MENU.md"><strong>Daily shadow-traffic menu</strong><span>SHADOW_TRAFFIC_MENU.md ↗</span></a>
+          <a class="evidence-link" href="IMPLEMENTATION.md"><strong>Design requirement implementation ledger</strong><span>IMPLEMENTATION.md ↗</span></a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-row">
+      <span><strong>ProtocolLab v0.1</strong> · evidence snapshot 20 September 2026</span>
+      <span>Finite protocols · bounded authority · replayable evidence</span>
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      const tabs = [...document.querySelectorAll('[role="tab"]')];
+      const panels = [...document.querySelectorAll('[role="tabpanel"]')];
+
+      function selectTab(tab) {
+        tabs.forEach((item) => item.setAttribute('aria-selected', String(item === tab)));
+        panels.forEach((panel) => { panel.hidden = panel.id !== tab.getAttribute('aria-controls'); });
+      }
+
+      tabs.forEach((tab) => {
+        tab.addEventListener('click', () => selectTab(tab));
+        tab.addEventListener('keydown', (event) => {
+          if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+          event.preventDefault();
+          const offset = event.key === 'ArrowRight' ? 1 : -1;
+          const next = tabs[(tabs.indexOf(tab) + offset + tabs.length) % tabs.length];
+          selectTab(next);
+          next.focus();
+        });
+      });
+
+      const items = [...document.querySelectorAll('.traffic-item')];
+      const fields = {
+        label: document.getElementById('case-label'),
+        name: document.getElementById('case-name'),
+        description: document.getElementById('case-description'),
+        batch: document.getElementById('case-batch'),
+        store: document.getElementById('case-store')
+      };
+
+      function selectCase(item, scroll = false) {
+        items.forEach((candidate) => candidate.classList.toggle('active', candidate === item));
+        fields.label.textContent = `Suggested day ${item.dataset.day} case`;
+        fields.name.textContent = item.dataset.name;
+        fields.description.textContent = item.dataset.description;
+        fields.batch.textContent = item.dataset.batch;
+        fields.store.textContent = item.dataset.store;
+        if (scroll && window.innerWidth < 900) document.querySelector('.today-card').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      items.forEach((item) => item.addEventListener('click', () => selectCase(item, true)));
+
+      const start = Date.UTC(2026, 8, 20);
+      const now = new Date();
+      const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+      const day = Math.floor((today - start) / 86400000) + 1;
+      if (day >= 1 && day <= 14) selectCase(items[day - 1]);
+    })();
+  </script>
+</body>
+</html>

@@ -277,6 +277,7 @@ class ActorDiagnosticHarness:
         acknowledged_count = 0
         environment_effect_count = 0
         effective_count = 0
+        finish_requested = False
         seen_observations: set[str] = set()
         outcomes: dict[str, int] = {}
         compute_summary: dict[str, int] = {}
@@ -428,6 +429,7 @@ class ActorDiagnosticHarness:
                                 effective_count += 1
 
                 elif proposal.kind == "FINISH":
+                    finish_requested = True
                     outcomes["FINISH"] = outcomes.get("FINISH", 0) + 1
                     runtime.store.append("actor", "actor.interaction_completed", {
                         "request_seq": req_seq,
@@ -436,8 +438,13 @@ class ActorDiagnosticHarness:
                     })
                     break
 
-            if runtime.finish()["status"] == "PUBLIC_CONTRACT_SATISFIED":
+            completion = runtime.finish()
+            if completion["status"] == "PUBLIC_CONTRACT_SATISFIED":
                 result.task_completed = True
+            elif finish_requested:
+                result.stop_rule_triggered = (
+                    f"PREMATURE_FINISH: {completion['status']}"
+                )
 
         except Exception as exc:
             result.samples.append({"error": f"EXECUTION_FAILED: {exc}"})

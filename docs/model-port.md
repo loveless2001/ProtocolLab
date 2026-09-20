@@ -42,6 +42,36 @@ usage; they still consume a call. API packet admission currently uses UTF-8 byte
 length as a conservative preflight bound, rather than claiming exact tokenization.
 API runs retain the provider's reproducibility limitations.
 
+### TypeSafe Jev constrained-choice adapter
+
+Jev returns typed choices rather than generated text. Use
+`scripts/typesafe_jev_port.py` only with `decision_mode: constrained_json` and a
+fixed candidate registry and the `standard` renderer. The adapter parses the
+canonical actor-visible packet into Jev's structured `state`, removes the
+generative proposal schema and checklist, and sends one natural-language Choice
+question. Each exact proposal is represented by a natural-language semantic
+description; the selected proposal is returned unchanged. The adapter rejects
+the old demarcated generative wrapper, free-text mode, and candidate-log-likelihood
+mode.
+
+This follows TypeSafe's SDK request shape: structured application state,
+natural-language instructions, and described Choice criteria. Do not add a sample
+proposal to the question. A sample can anchor the decision even though Jev already
+has a closed set of valid answers.
+
+The adapter retains the upstream request and response by SHA-256, including the
+complete probability vector, confidence, resolved provider model ID, token
+usage, and timing. Credentials are read server-side from the configured
+environment variable or an operator-supplied environment file and are never
+written to those artifacts. Keep `.env` files outside version control.
+
+TypeSafe's model catalog may expose an alias while inference returns a more
+specific model ID. Bind both the exact catalog card and the resolved response
+model in `port.lock.json`; derive the ProtocolLab fingerprint from both. This is
+provider-identity evidence, not an immutable model-artifact hash. A changed
+catalog card, resolved model, input/choice format, candidate set, token cap, seed
+request, or adapter hash is a hard failure.
+
 ## Local checkpoint
 
 Configure `backend: local_frozen_checkpoint`, an existing checkpoint directory,
