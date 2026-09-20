@@ -324,13 +324,30 @@ class DecisionAdapter:
             )
 
         attempt_outcome = ledger.gateway.execute_attempt(spec, transport, validate)
-        if attempt_outcome.is_no_new_execution:
-            reason = str(attempt_outcome.error or attempt_outcome.conflict or "")
-            validation_outcome = (
-                "BUDGET_EXHAUSTED"
-                if "max_" in reason or "BUDGET" in reason.upper()
-                else "DUPLICATE_REQUEST"
+        if attempt_outcome.is_no_new_execution or attempt_outcome.conflict:
+            reason = str(attempt_outcome.conflict or attempt_outcome.error or "")
+            lifecycle_conflict = (
+                attempt_outcome.conflict is not None
+                and not attempt_outcome.is_no_new_execution
             )
+            if lifecycle_conflict:
+                validation_outcome = "LIFECYCLE_CONFLICT"
+                error_type = "LifecycleConflict"
+            elif "max_" in reason or "BUDGET" in reason.upper():
+                validation_outcome = "BUDGET_EXHAUSTED"
+                error_type = "NoNewExecution"
+            else:
+                validation_outcome = "DUPLICATE_REQUEST"
+                error_type = "NoNewExecution"
+            meta = attempt_outcome.compute_meta or {}
+            if lifecycle_conflict:
+                backend_meta = {
+                    **meta.get("backend_meta", {}),
+                    "lifecycle_error_type": error_type,
+                    "lifecycle_reason": reason,
+                }
+            else:
+                backend_meta = {"error_type": error_type, "reason": reason}
             return DecisionOutcome(
                 mode=mode,
                 proposal=ActorProposal(kind="WAIT"),
@@ -342,7 +359,18 @@ class DecisionAdapter:
                 is_fallback=True,
                 decision_basis_ref=basis_ref,
                 claim_refs=claim_refs,
-                backend_meta={"error_type": "NoNewExecution", "reason": reason},
+                request_input_tokens=(
+                    attempt_outcome.confirmed_input if lifecycle_conflict else 0
+                ),
+                request_output_tokens=(
+                    attempt_outcome.confirmed_output if lifecycle_conflict else 0
+                ),
+                total_tokens_evaluated=(
+                    int(meta.get("total_tokens_evaluated", 0))
+                    if lifecycle_conflict
+                    else 0
+                ),
+                backend_meta=backend_meta,
             )
 
         meta = attempt_outcome.compute_meta or {}

@@ -3,7 +3,15 @@ on: [push, pull_request]
 jobs:
   acceptance:
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 40
+    env:
+      BEND_NO_TELEMETRY: "1"
+      BEND_VERSION: "2.0.16"
+      BEND_ARCHIVE_SHA256: "496ff13a312221c3dc0dde4077368ced42c0f3eadcb61c2d43de5caddf0e50b4"
+      BEND_BINARY_SHA256: "1c39375c1bf500542d5de373a4658986e090229ff966fa3ebf77065f37265a2b"
+      BUN_VERSION: "1.3.8"
+      BUN_ARCHIVE_SHA256: "0322b17f0722da76a64298aad498225aedcbf6df1008a1dee45e16ecb226a3f1"
+      BUN_BINARY_SHA256: "0bb81ea882bce5946a1fc0d26d61880276d81fe22714714b5a2b792bdff8ea7a"
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux isolation and pinned tooling
@@ -15,16 +23,27 @@ jobs:
           uv sync --locked --extra local-model
       - name: Install Bun and Bend toolchain
         run: |
-          curl -fsSL https://bun.sh/install | bash
+          set -euo pipefail
+          curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" -o /tmp/bun.zip
+          echo "${BUN_ARCHIVE_SHA256}  /tmp/bun.zip" | sha256sum -c -
+          unzip -q /tmp/bun.zip -d /tmp/bun-release
+          mkdir -p "$HOME/.bun/bin"
+          install -m 0755 /tmp/bun-release/bun-linux-x64/bun "$HOME/.bun/bin/bun"
           echo "$HOME/.bun/bin" >> $GITHUB_PATH
           export PATH="$HOME/.bun/bin:$PATH"
-          curl -fsSL https://bend-lang.com/install.sh | sh
+
+          curl -fsSL "https://github.com/bendlang/bend/releases/download/v${BEND_VERSION}/bend-${BEND_VERSION}-linux-x64.tar.gz" -o /tmp/bend.tar.gz
+          echo "${BEND_ARCHIVE_SHA256}  /tmp/bend.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.bend"
+          tar -xzf /tmp/bend.tar.gz -C "$HOME/.bend" --strip-components=1
+          echo "${BEND_BINARY_SHA256}  $HOME/.bend/bin/bend" | sha256sum -c -
           echo "$HOME/.bend/bin" >> $GITHUB_PATH
           export PATH="$HOME/.bend/bin:$PATH"
           mkdir -p "$HOME/.bend/bend2"
-          cp -r verified/lifecycle/toolchain/bend2/* "$HOME/.bend/bend2/"
-          bun --version
-          bend --version
+          cp -r verified/lifecycle/toolchain/bend2/. "$HOME/.bend/bend2/"
+          echo "${BUN_BINARY_SHA256}  $HOME/.bun/bin/bun" | sha256sum -c -
+          test "$(bun --version)" = "$BUN_VERSION"
+          test "$(bend --version)" = "bend $BEND_VERSION"
       - name: Check sandbox Python startup
         run: |
           set -euo pipefail

@@ -365,6 +365,7 @@ class AttemptGateway:
                 "winning_json": outcome.winning_json,
                 "compute_meta": outcome.compute_meta,
                 "evaluations": outcome.evaluations,
+                "error": str(outcome.error) if outcome.error is not None else None,
                 "conflict": outcome.conflict,
             }
             self.owner.store.set(
@@ -511,9 +512,12 @@ class AttemptGateway:
     def _load_outcome(
         self, handle: str, *, allow_fallback: bool = True
     ) -> AttemptOutcome | None:
-        """Load outcome from memory cache or reconstruct from store."""
-        if handle in self._outcomes:
-            return self._outcomes[handle]
+        """Load the durable outcome before consulting the process-local cache.
+
+        Trusted evidence may be reconciled by another owner process. The store
+        is therefore authoritative whenever it is available; an unversioned
+        in-memory result must never hide a newer persisted settlement.
+        """
         if hasattr(self.owner, "store") and hasattr(self.owner.store, "get"):
             stored = self.owner.store.get("verified_attempt_outcomes", f"{self.owner.run_id}:{handle}")
             if stored is not None and isinstance(stored, dict):
@@ -531,6 +535,11 @@ class AttemptGateway:
                     winning_json=stored.get("winning_json"),
                     compute_meta=stored.get("compute_meta"),
                     evaluations=stored.get("evaluations"),
+                    error=(
+                        RuntimeError(stored["error"])
+                        if stored.get("error") is not None
+                        else None
+                    ),
                     conflict=stored.get("conflict"),
                 )
                 self._outcomes[handle] = outcome
@@ -578,7 +587,61 @@ class AttemptGateway:
                 self._outcomes[handle] = outcome
                 return outcome
 
-        return None
+        return self._outcomes.get(handle)
+
+    def _outcome_from_record(
+        self,
+        handle: str,
+        record: Any,
+        existing: AttemptOutcome | None,
+        *,
+        raw_response: str | None = None,
+        conflict: str | None = None,
+    ) -> AttemptOutcome:
+        """Project the active authority's request record into a gateway outcome."""
+        charge_kind = getattr(
+            record.charge,
+            "kind",
+            getattr(record.charge, "value", str(record.charge)),
+        )
+        if isinstance(charge_kind, Enum):
+            charge_kind = charge_kind.value
+
+        if charge_kind in ("Settled", "SETTLED"):
+            accounting_status = AccountingStatus.SETTLED
+            confirmed_input = getattr(record.charge, "input_tokens", 0) or 0
+            confirmed_output = getattr(record.charge, "output_tokens", 0) or 0
+            held_tokens = 0
+        elif charge_kind in ("Released", "RELEASED"):
+            accounting_status = AccountingStatus.RELEASED
+            confirmed_input = 0
+            confirmed_output = 0
+            held_tokens = 0
+        else:
+            accounting_status = AccountingStatus.PENDING
+            confirmed_input = 0
+            confirmed_output = 0
+            held_tokens = getattr(record.charge, "tokens", 0) or 0
+
+        if existing is None:
+            existing = AttemptOutcome(
+                attempt_id=handle,
+                execution_state=self._execution_state_for_record(record),
+                accounting_status=accounting_status,
+                validation_outcome="UNKNOWN",
+            )
+        return replace(
+            existing,
+            execution_state=self._execution_state_for_record(record),
+            accounting_status=accounting_status,
+            confirmed_input=confirmed_input,
+            confirmed_output=confirmed_output,
+            held_tokens=held_tokens,
+            raw_response=(
+                raw_response if raw_response is not None else existing.raw_response
+            ),
+            conflict=conflict if conflict is not None else existing.conflict,
+        )
 
     def _sync_from_owner(self) -> None:
         """Hydrate Gateway known attempts from the underlying store / owner."""
@@ -848,7 +911,7 @@ class AttemptGateway:
                     spec = self._load_spec(handle, refresh=True)
                     rec = self.owner.get_request_record(handle)
                     stage = spec.stage if spec else (rec.stage if rec is not None else "stage1")
-                    self._persist_evidence(handle, report)
+                    evidence_ref = self._persist_evidence(handle, report)
 
                     if report.not_sent_proof_ref is not None and not report.completion:
                         permit = self._permits.get(handle)
@@ -900,92 +963,76 @@ class AttemptGateway:
                             receipt_hash=receipt_ref,
                         )
                         kind = getattr(verdict, "value", verdict)
-                        self._execution_states[handle] = ExecutionState.FINISHED
                         existing_out = self._load_outcome(
                             handle, allow_fallback=False
                         )
                         settled_rec = self.owner.get_request_record(handle)
-                        settled_input = report.usage.input_tokens
-                        settled_output = report.usage.output_tokens
-                        if (
-                            settled_rec is not None
-                            and getattr(settled_rec.charge, "kind", None) == "Settled"
-                        ):
-                            settled_input = settled_rec.charge.input_tokens or 0
-                            settled_output = settled_rec.charge.output_tokens or 0
-                        conflict = None
+                        conflict = existing_out.conflict if existing_out else None
                         if kind == "ConflictFault":
                             conflict = self.owner.active_fault or "EVIDENCE_CONFLICT"
-                        updated_out = AttemptOutcome(
-                            attempt_id=handle,
-                            execution_state=ExecutionState.FINISHED,
-                            accounting_status=AccountingStatus.SETTLED,
-                            validation_outcome=(
-                                existing_out.validation_outcome
-                                if existing_out is not None
-                                else "UNKNOWN"
-                            ),
-                            confirmed_input=settled_input,
-                            confirmed_output=settled_output,
-                            raw_response=(
-                                report.raw_text
-                                or (existing_out.raw_response if existing_out else None)
-                            ),
-                            parsed_payload=(
-                                existing_out.parsed_payload if existing_out else None
-                            ),
-                            winning_json=(
-                                existing_out.winning_json if existing_out else None
-                            ),
-                            compute_meta=(
-                                existing_out.compute_meta if existing_out else None
-                            ),
-                            evaluations=(
-                                existing_out.evaluations if existing_out else None
-                            ),
+                        elif kind == "Rejected":
+                            conflict = "EVIDENCE_REJECTED"
+                        if settled_rec is None:
+                            return RecordEvidenceConflict(
+                                conflict or "ATTEMPT_NOT_FOUND"
+                            )
+                        updated_out = self._outcome_from_record(
+                            handle,
+                            settled_rec,
+                            existing_out,
+                            raw_response=report.raw_text,
                             conflict=conflict,
                         )
+                        self._execution_states[handle] = updated_out.execution_state
                         self._save_outcome(handle, updated_out)
                         if kind == "DuplicateNoop":
                             return RecordEvidenceDuplicate(retained_ref=receipt_ref)
                         if kind in ("ConflictFault", "Rejected"):
                             return RecordEvidenceConflict(
                                 conflict or "EVIDENCE_CONFLICT",
-                                execution_state=ExecutionState.FINISHED,
-                                accounting_status=AccountingStatus.SETTLED,
+                                execution_state=updated_out.execution_state,
+                                accounting_status=updated_out.accounting_status,
                             )
                         return RecordEvidenceRecorded(
-                            ExecutionState.FINISHED, AccountingStatus.SETTLED
+                            updated_out.execution_state,
+                            updated_out.accounting_status,
                         )
 
-                    self.owner.record_timeout(
+                    verdict = self.owner.record_timeout(
                         stage=stage,
                         req_id=handle,
                         reason=report.error_ref or "OUTCOME_UNKNOWN_HELD_PENDING",
                     )
-                    held = spec.declared_reservation_charge if spec else 0
-                    self._execution_states[handle] = ExecutionState.STARTED
+                    kind = getattr(verdict, "value", verdict)
                     existing_out = self._load_outcome(
                         handle, allow_fallback=False
                     )
-                    updated_out = AttemptOutcome(
-                        attempt_id=handle,
-                        execution_state=ExecutionState.STARTED,
-                        accounting_status=AccountingStatus.PENDING,
-                        validation_outcome=(
-                            existing_out.validation_outcome
-                            if existing_out is not None
-                            else "UNKNOWN"
-                        ),
-                        held_tokens=held,
-                        raw_response=(
-                            report.raw_text
-                            or (existing_out.raw_response if existing_out else None)
-                        ),
+                    current_rec = self.owner.get_request_record(handle)
+                    if current_rec is None:
+                        return RecordEvidenceConflict("ATTEMPT_NOT_FOUND")
+                    conflict = existing_out.conflict if existing_out else None
+                    if kind in ("ConflictFault", "Rejected"):
+                        conflict = self.owner.active_fault or "EVIDENCE_CONFLICT"
+                    updated_out = self._outcome_from_record(
+                        handle,
+                        current_rec,
+                        existing_out,
+                        raw_response=report.raw_text,
+                        conflict=conflict,
                     )
+                    self._execution_states[handle] = updated_out.execution_state
                     self._save_outcome(handle, updated_out)
+                    if kind == "DuplicateNoop":
+                        return RecordEvidenceDuplicate(retained_ref=evidence_ref)
+                    if kind in ("ConflictFault", "Rejected"):
+                        return RecordEvidenceConflict(
+                            conflict or "EVIDENCE_CONFLICT",
+                            execution_state=updated_out.execution_state,
+                            accounting_status=updated_out.accounting_status,
+                        )
                     return RecordEvidenceRecorded(
-                        ExecutionState.STARTED, AccountingStatus.PENDING
+                        updated_out.execution_state,
+                        updated_out.accounting_status,
                     )
             except Exception:
                 self._recover_after_rollback()
@@ -1194,18 +1241,32 @@ class AttemptGateway:
 
         # Step 4: Record Evidence & Settle Accounting
         ev_result = self.record_evidence(spec.attempt_id, transport_report)
-        acct_status = getattr(
-            ev_result, "accounting_status", AccountingStatus.PENDING
+        evidence_outcome = self._load_outcome(
+            spec.attempt_id, allow_fallback=False
         )
-        exec_state = getattr(
-            ev_result, "execution_state", ExecutionState.STARTED
+        acct_status = (
+            evidence_outcome.accounting_status
+            if evidence_outcome is not None
+            else getattr(ev_result, "accounting_status", AccountingStatus.PENDING)
+        )
+        exec_state = (
+            evidence_outcome.execution_state
+            if evidence_outcome is not None
+            else getattr(ev_result, "execution_state", ExecutionState.STARTED)
+        )
+        evidence_conflict = (
+            ev_result.reason if isinstance(ev_result, RecordEvidenceConflict) else None
         )
 
         # Compute confirmed usage
         conf_in = 0
         conf_out = 0
         held = 0
-        if acct_status == AccountingStatus.SETTLED:
+        if evidence_outcome is not None:
+            conf_in = evidence_outcome.confirmed_input
+            conf_out = evidence_outcome.confirmed_output
+            held = evidence_outcome.held_tokens
+        elif acct_status == AccountingStatus.SETTLED:
             conf_in = transport_report.usage.input_tokens
             conf_out = transport_report.usage.output_tokens
         elif acct_status == AccountingStatus.PENDING:
@@ -1230,22 +1291,31 @@ class AttemptGateway:
             if retained_validation is not None:
                 val_report = retained_validation
 
-        outcome = AttemptOutcome(
-            attempt_id=spec.attempt_id,
-            execution_state=exec_state,
-            accounting_status=acct_status,
-            validation_outcome=val_report.outcome.value
-            if val_report.outcome
-            else "UNKNOWN",
-            confirmed_input=conf_in,
-            confirmed_output=conf_out,
-            held_tokens=held,
-            raw_response=transport_report.raw_text,
+        current_outcome = self._load_outcome(
+            spec.attempt_id, allow_fallback=False
+        )
+        if current_outcome is None:
+            current_outcome = AttemptOutcome(
+                attempt_id=spec.attempt_id,
+                execution_state=exec_state,
+                accounting_status=acct_status,
+                validation_outcome="UNKNOWN",
+                confirmed_input=conf_in,
+                confirmed_output=conf_out,
+                held_tokens=held,
+                raw_response=transport_report.raw_text,
+            )
+        outcome = replace(
+            current_outcome,
+            validation_outcome=(
+                val_report.outcome.value if val_report.outcome else "UNKNOWN"
+            ),
             parsed_payload=val_report.parsed_payload,
             winning_json=val_report.winning_json,
             compute_meta=val_report.compute_meta,
             evaluations=val_report.evaluations,
             error=RuntimeError(val_report.reason) if val_report.reason else None,
+            conflict=current_outcome.conflict or evidence_conflict,
         )
         with self._lock:
             self._save_outcome(spec.attempt_id, outcome)

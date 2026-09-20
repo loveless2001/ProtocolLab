@@ -1252,3 +1252,174 @@ def test_validator_exception_produces_structured_rejection(store, bridge):
     assert owner.state.aggregate.input_tokens == 100
     assert owner.state.aggregate.output_tokens == 10
     assert len(owner.gateway._outcomes) == 1
+
+
+def test_late_unknown_does_not_regress_settled_gateway_outcome(store, bridge):
+    owner = make_owner(store, "run_late_unknown", bridge)
+    spec = make_spec(owner.run_id, "req_late_unknown")
+
+    def completed(permit):
+        assert permit.consume()
+        return TransportReport(
+            attempt_id=permit.attempt_id,
+            completion=True,
+            raw_text='{"kind":"WAIT"}',
+            usage=UsageReport("VerifiedFinal", 100, 10, "initial-receipt"),
+        )
+
+    first = owner.gateway.execute_attempt(
+        spec,
+        completed,
+        lambda report: ValidationReport(ValidationOutcome.ACCEPTED),
+    )
+    assert first.accounting_status == AccountingStatus.SETTLED
+
+    late_unknown = attest(
+        owner.gateway,
+        TransportReport(
+            attempt_id=spec.attempt_id,
+            error_ref="delayed transport failure notification",
+        ),
+    )
+    owner.gateway.record_evidence(spec.attempt_id, late_unknown)
+
+    record = owner.get_request_record(spec.attempt_id)
+    assert record.charge.kind == ChargeKind.SETTLED
+    after = owner.gateway._load_outcome(spec.attempt_id)
+    assert after is not None
+    assert after.execution_state == ExecutionState.FINISHED
+    assert after.accounting_status == AccountingStatus.SETTLED
+    assert (after.confirmed_input, after.confirmed_output, after.held_tokens) == (
+        100,
+        10,
+        0,
+    )
+
+
+def test_late_settlement_by_another_owner_invalidates_cached_outcome(store, bridge):
+    run_id = "run_cross_owner_settlement"
+    first_owner = make_owner(store, run_id, bridge)
+    spec = make_spec(run_id, "req_cross_owner")
+
+    def unknown(permit):
+        assert permit.consume()
+        return TransportReport(
+            attempt_id=permit.attempt_id,
+            error_ref="response unknown",
+        )
+
+    first_owner.gateway.execute_attempt(
+        spec,
+        unknown,
+        lambda report: ValidationReport(
+            ValidationOutcome.REJECTED, reason="NO_RESPONSE"
+        ),
+    )
+
+    second_owner = make_owner(store, run_id, bridge)
+    second_owner.gateway.record_evidence(
+        spec.attempt_id,
+        attest(
+            second_owner.gateway,
+            TransportReport(
+                attempt_id=spec.attempt_id,
+                completion=True,
+                usage=UsageReport("VerifiedFinal", 80, 5, "late-receipt"),
+                raw_text='{"kind":"WAIT"}',
+            ),
+        ),
+    )
+
+    replay = first_owner.gateway.execute_attempt(
+        spec,
+        lambda permit: pytest.fail("replay must not invoke backend"),
+        lambda report: ValidationReport(ValidationOutcome.ACCEPTED),
+    )
+    assert replay.is_no_new_execution
+    assert replay.execution_state == ExecutionState.FINISHED
+    assert replay.accounting_status == AccountingStatus.SETTLED
+    assert (replay.confirmed_input, replay.confirmed_output, replay.held_tokens) == (
+        80,
+        5,
+        0,
+    )
+
+
+def test_execute_attempt_preserves_evidence_conflict_in_final_outcome(store, bridge):
+    owner = make_owner(store, "run_execute_conflict", bridge)
+    spec = make_spec(owner.run_id, "req_execute_conflict")
+
+    def over_bound(permit):
+        assert permit.consume()
+        return TransportReport(
+            attempt_id=permit.attempt_id,
+            completion=True,
+            raw_text='{"kind":"WAIT"}',
+            usage=UsageReport("VerifiedFinal", 200, 50, "over-bound-receipt"),
+        )
+
+    result = owner.gateway.execute_attempt(
+        spec,
+        over_bound,
+        lambda report: ValidationReport(
+            ValidationOutcome.ACCEPTED, parsed_payload={"kind": "WAIT"}
+        ),
+    )
+
+    assert owner.active_fault == "BOUND_VIOLATION_FAULT"
+    assert (result.confirmed_input, result.confirmed_output) == (200, 50)
+    assert result.conflict == "BOUND_VIOLATION_FAULT"
+    persisted = store.get(
+        "verified_attempt_outcomes", f"{owner.run_id}:{spec.attempt_id}"
+    )
+    assert persisted["conflict"] == "BOUND_VIOLATION_FAULT"
+
+
+def test_decision_adapter_falls_back_on_lifecycle_conflict(store, bridge):
+    from protocollab.actor.diagnostic_config import DiagnosticConfig
+    from protocollab.actor.modes import DecisionAdapter
+
+    port_config = ModelPortConfig(
+        backend="api",
+        model_id="over-bound-test",
+        endpoint="https://model.invalid",
+        max_input_tokens=1000,
+        max_output_tokens=10,
+    )
+    adapter = DecisionAdapter(
+        DiagnosticConfig(
+            model_port_config=port_config,
+            decision_mode="free_json",
+            renderer="demarcated",
+        )
+    )
+
+    class OverBoundPort:
+        def __init__(self):
+            self.config = port_config
+            self.phase = "suffix"
+            self.store = store
+            self.input_tokens = 0
+            self.output_tokens = 0
+
+        def generate(self, packet, seed, prompt_override=None):
+            self.input_tokens += 2000
+            self.output_tokens += 50
+            return '{"kind":"FINISH"}'
+
+    owner = make_owner(store, "run_adapter_conflict", bridge)
+    packet = {
+        "schema_version": "0.1",
+        "public_alphabet": ["TICK"],
+        "task": {},
+        "decision_basis_ref": "basis-adapter-conflict",
+    }
+    outcome = adapter.decide(
+        OverBoundPort(), packet, seed=7, ledger=owner, stage="stage1"
+    )
+
+    assert owner.active_fault == "BOUND_VIOLATION_FAULT"
+    assert outcome.is_fallback is True
+    assert outcome.proposal.kind == "WAIT"
+    assert outcome.validation_outcome == "LIFECYCLE_CONFLICT"
+    assert (outcome.request_input_tokens, outcome.request_output_tokens) == (2000, 50)

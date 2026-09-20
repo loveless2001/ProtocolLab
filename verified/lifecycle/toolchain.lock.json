@@ -9,6 +9,10 @@
   "bend": {
     "version": "2.0.16",
     "inspected_source_baseline": "v2.0.16",
+    "release_archive": {
+      "url": "https://github.com/bendlang/bend/releases/download/v2.0.16/bend-2.0.16-linux-x64.tar.gz",
+      "sha256": "496ff13a312221c3dc0dde4077368ced42c0f3eadcb61c2d43de5caddf0e50b4"
+    },
     "binary_path": "/home/lenovo/.bend/bin/bend",
     "binary_sha256": "1c39375c1bf500542d5de373a4658986e090229ff966fa3ebf77065f37265a2b",
     "source_files": {
@@ -33,6 +37,10 @@
   "runtimes": {
     "bun": {
       "version": "1.3.8",
+      "release_archive": {
+        "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.8/bun-linux-x64.zip",
+        "sha256": "0322b17f0722da76a64298aad498225aedcbf6df1008a1dee45e16ecb226a3f1"
+      },
       "binary_path": "/home/lenovo/.bun/bin/bun",
       "binary_sha256": "0bb81ea882bce5946a1fc0d26d61880276d81fe22714714b5a2b792bdff8ea7a"
     },
