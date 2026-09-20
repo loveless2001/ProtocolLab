@@ -12,6 +12,7 @@ Tests real boundaries:
 from __future__ import annotations
 
 import http.server
+import inspect
 import socketserver
 import threading
 
@@ -1296,6 +1297,57 @@ def test_late_unknown_does_not_regress_settled_gateway_outcome(store, bridge):
     )
 
 
+def test_recovery_validates_settling_response_not_later_status_notice(store, bridge):
+    owner = make_owner(store, "run_recovery_evidence_selection", bridge)
+    spec = make_spec(owner.run_id, "req_recovery_evidence_selection")
+    assert isinstance(owner.gateway.prepare(spec), PrepareReady)
+    granted = owner.gateway.claim_start(spec.attempt_id)
+    assert isinstance(granted, ClaimGranted)
+    assert granted.permit.consume()
+
+    owner.gateway.record_evidence(
+        spec.attempt_id,
+        attest(
+            owner.gateway,
+            TransportReport(
+                attempt_id=spec.attempt_id,
+                completion=True,
+                raw_text='{"kind":"WAIT"}',
+                usage=UsageReport("VerifiedFinal", 100, 10, "settling-receipt"),
+            ),
+        ),
+    )
+    owner.gateway.record_evidence(
+        spec.attempt_id,
+        attest(
+            owner.gateway,
+            TransportReport(
+                attempt_id=spec.attempt_id,
+                error_ref="delayed transport failure notification",
+            ),
+        ),
+    )
+
+    restarted = make_owner(store, owner.run_id, bridge)
+    seen = []
+
+    def validate_recovered(report):
+        seen.append((report.usage.kind, report.raw_text))
+        return ValidationReport(
+            ValidationOutcome.ACCEPTED, parsed_payload={"kind": "WAIT"}
+        )
+
+    recovered = restarted.gateway.execute_attempt(
+        spec,
+        lambda permit: pytest.fail("recovery must not invoke backend"),
+        validate_recovered,
+    )
+    assert seen == [("VerifiedFinal", '{"kind":"WAIT"}')]
+    assert recovered.is_no_new_execution
+    assert recovered.validation_outcome == ValidationOutcome.ACCEPTED.value
+    assert (recovered.confirmed_input, recovered.confirmed_output) == (100, 10)
+
+
 def test_late_settlement_by_another_owner_invalidates_cached_outcome(store, bridge):
     run_id = "run_cross_owner_settlement"
     first_owner = make_owner(store, run_id, bridge)
@@ -1339,6 +1391,98 @@ def test_late_settlement_by_another_owner_invalidates_cached_outcome(store, brid
     assert replay.execution_state == ExecutionState.FINISHED
     assert replay.accounting_status == AccountingStatus.SETTLED
     assert (replay.confirmed_input, replay.confirmed_output, replay.held_tokens) == (
+        80,
+        5,
+        0,
+    )
+
+
+def test_final_projection_cannot_overwrite_concurrent_settlement(
+    tmp_path, bridge, monkeypatch
+):
+    database = tmp_path / "concurrent_settlement.db"
+    first = make_owner(Store(database), "run_concurrent_settlement", bridge)
+    gateway = first.gateway
+    spec = make_spec(first.run_id, "req_concurrent_settlement")
+    reader_ready = threading.Event()
+    writer_done = threading.Event()
+    errors = []
+    direct_loads = 0
+    original_load = gateway._load_outcome
+
+    def read_hook(handle, *, allow_fallback=True):
+        nonlocal direct_loads
+        result = original_load(handle, allow_fallback=allow_fallback)
+        caller = inspect.currentframe().f_back.f_code.co_name
+        if caller == "execute_attempt":
+            direct_loads += 1
+            if direct_loads == 2:
+                reader_ready.set()
+                # A transactionally protected implementation may make the
+                # competing writer wait until this projection is committed.
+                writer_done.wait(1.0)
+        return result
+
+    monkeypatch.setattr(gateway, "_load_outcome", read_hook)
+
+    def settle_from_second_connection():
+        try:
+            if not reader_ready.wait(10):
+                raise AssertionError("final-read checkpoint was not reached")
+            second = make_owner(Store(database), first.run_id, bridge)
+            second.gateway.record_evidence(
+                spec.attempt_id,
+                attest(
+                    second.gateway,
+                    TransportReport(
+                        attempt_id=spec.attempt_id,
+                        completion=True,
+                        raw_text='{"kind":"WAIT"}',
+                        usage=UsageReport(
+                            "VerifiedFinal", 80, 5, "concurrent-late-receipt"
+                        ),
+                    ),
+                ),
+            )
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            writer_done.set()
+
+    worker = threading.Thread(target=settle_from_second_connection, daemon=True)
+    worker.start()
+
+    def unknown_transport(permit):
+        assert permit.consume()
+        return TransportReport(
+            attempt_id=permit.attempt_id, error_ref="response outcome unknown"
+        )
+
+    try:
+        gateway.execute_attempt(
+            spec,
+            unknown_transport,
+            lambda report: ValidationReport(
+                ValidationOutcome.REJECTED, reason="NO_RESPONSE"
+            ),
+        )
+    finally:
+        reader_ready.set()
+        worker.join(15)
+
+    assert not worker.is_alive(), "second database writer did not finish"
+    if errors:
+        raise errors[0]
+    assert direct_loads >= 2
+
+    restarted = make_owner(Store(database), first.run_id, bridge)
+    record = restarted.get_request_record(spec.attempt_id)
+    assert record.charge.kind == ChargeKind.SETTLED
+    assert (record.charge.input_tokens, record.charge.output_tokens) == (80, 5)
+    outcome = restarted.gateway._load_outcome(spec.attempt_id)
+    assert outcome.execution_state == ExecutionState.FINISHED
+    assert outcome.accounting_status == AccountingStatus.SETTLED
+    assert (outcome.confirmed_input, outcome.confirmed_output, outcome.held_tokens) == (
         80,
         5,
         0,

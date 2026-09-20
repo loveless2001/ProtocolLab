@@ -395,10 +395,8 @@ class AttemptGateway:
         self,
         handle: str,
         report: TransportReport,
-        *,
-        update_latest: bool = True,
     ) -> str:
-        """Append immutable raw evidence and update the latest-evidence pointer."""
+        """Append immutable raw evidence without changing recovery selection."""
         rep_dict = self._report_dict(report)
         evidence_ref = digest(rep_dict)
         if hasattr(self.owner, "store") and hasattr(self.owner.store, "set"):
@@ -408,22 +406,29 @@ class AttemptGateway:
                 rep_dict,
                 "verified.attempt_evidence_item_persisted",
             )
-            if update_latest:
-                self.owner.store.set(
-                    "verified_attempt_evidence",
-                    f"{self.owner.run_id}:{handle}",
-                    rep_dict,
-                    "verified.attempt_evidence_persisted",
-                )
         return evidence_ref
+
+    def _promote_evidence(self, handle: str, report: TransportReport) -> None:
+        """Select evidence that may drive recovery validation.
+
+        Raw evidence is always retained by ``_persist_evidence``.  This pointer
+        advances only after the active lifecycle authority accepts the matching
+        transition, so a duplicate, conflicting, or late status notice cannot
+        displace the response that settled the attempt.
+        """
+        if hasattr(self.owner, "store") and hasattr(self.owner.store, "set"):
+            self.owner.store.set(
+                "verified_attempt_evidence",
+                f"{self.owner.run_id}:{handle}",
+                self._report_dict(report),
+                "verified.attempt_evidence_persisted",
+            )
 
     def _quarantine_evidence(
         self, handle: str, report: TransportReport, reason: str
     ) -> str:
         with self._store_transaction():
-            evidence_ref = self._persist_evidence(
-                handle, report, update_latest=False
-            )
+            evidence_ref = self._persist_evidence(handle, report)
             self.owner.store.set(
                 "verified_untrusted_evidence",
                 f"{self.owner.run_id}:{handle}:{evidence_ref}",
@@ -936,6 +941,8 @@ class AttemptGateway:
                                     self.owner.get_request_record(handle)
                                 ),
                             )
+                        if kind != "DuplicateNoop":
+                            self._promote_evidence(handle, report)
                         self._execution_states[handle] = ExecutionState.NOT_SENT
                         outcome = AttemptOutcome(
                             attempt_id=handle,
@@ -976,6 +983,8 @@ class AttemptGateway:
                             return RecordEvidenceConflict(
                                 conflict or "ATTEMPT_NOT_FOUND"
                             )
+                        if kind not in ("DuplicateNoop", "ConflictFault", "Rejected"):
+                            self._promote_evidence(handle, report)
                         updated_out = self._outcome_from_record(
                             handle,
                             settled_rec,
@@ -1013,6 +1022,8 @@ class AttemptGateway:
                     conflict = existing_out.conflict if existing_out else None
                     if kind in ("ConflictFault", "Rejected"):
                         conflict = self.owner.active_fault or "EVIDENCE_CONFLICT"
+                    if kind not in ("DuplicateNoop", "ConflictFault", "Rejected"):
+                        self._promote_evidence(handle, report)
                     updated_out = self._outcome_from_record(
                         handle,
                         current_rec,
@@ -1291,33 +1302,37 @@ class AttemptGateway:
             if retained_validation is not None:
                 val_report = retained_validation
 
-        current_outcome = self._load_outcome(
-            spec.attempt_id, allow_fallback=False
-        )
-        if current_outcome is None:
-            current_outcome = AttemptOutcome(
-                attempt_id=spec.attempt_id,
-                execution_state=exec_state,
-                accounting_status=acct_status,
-                validation_outcome="UNKNOWN",
-                confirmed_input=conf_in,
-                confirmed_output=conf_out,
-                held_tokens=held,
-                raw_response=transport_report.raw_text,
-            )
-        outcome = replace(
-            current_outcome,
-            validation_outcome=(
-                val_report.outcome.value if val_report.outcome else "UNKNOWN"
-            ),
-            parsed_payload=val_report.parsed_payload,
-            winning_json=val_report.winning_json,
-            compute_meta=val_report.compute_meta,
-            evaluations=val_report.evaluations,
-            error=RuntimeError(val_report.reason) if val_report.reason else None,
-            conflict=current_outcome.conflict or evidence_conflict,
-        )
+        # A concurrent reconciliation may settle or fault the attempt while
+        # validation runs. Protect the final read/merge/write across Store
+        # connections so this projection cannot overwrite that newer state.
         with self._lock:
-            self._save_outcome(spec.attempt_id, outcome)
+            with self._store_transaction():
+                current_outcome = self._load_outcome(
+                    spec.attempt_id, allow_fallback=False
+                )
+                if current_outcome is None:
+                    current_outcome = AttemptOutcome(
+                        attempt_id=spec.attempt_id,
+                        execution_state=exec_state,
+                        accounting_status=acct_status,
+                        validation_outcome="UNKNOWN",
+                        confirmed_input=conf_in,
+                        confirmed_output=conf_out,
+                        held_tokens=held,
+                        raw_response=transport_report.raw_text,
+                    )
+                outcome = replace(
+                    current_outcome,
+                    validation_outcome=(
+                        val_report.outcome.value if val_report.outcome else "UNKNOWN"
+                    ),
+                    parsed_payload=val_report.parsed_payload,
+                    winning_json=val_report.winning_json,
+                    compute_meta=val_report.compute_meta,
+                    evaluations=val_report.evaluations,
+                    error=RuntimeError(val_report.reason) if val_report.reason else None,
+                    conflict=current_outcome.conflict or evidence_conflict,
+                )
+                self._save_outcome(spec.attempt_id, outcome)
 
         return outcome
