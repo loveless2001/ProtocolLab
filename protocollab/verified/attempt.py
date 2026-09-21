@@ -1116,6 +1116,49 @@ class AttemptGateway:
                     except Exception:
                         pass
 
+    def _finalize_validation_outcome(
+        self,
+        handle: str,
+        proposed_validation: ValidationReport,
+        fallback_outcome: AttemptOutcome,
+        *,
+        is_no_new_execution: bool | None = None,
+    ) -> AttemptOutcome:
+        """Project canonical validation onto the latest durable outcome.
+
+        Validation runs outside the Store transaction. While it is running,
+        another owner may commit newer accounting or conflict state, or win the
+        immutable validation write. Re-read both records under one write
+        transaction before merging so finalization cannot overwrite either.
+        """
+        with self._lock:
+            with self._store_transaction():
+                canonical_validation = self._load_validation(handle)
+                validation = canonical_validation or proposed_validation
+                current_outcome = self._load_outcome(
+                    handle, allow_fallback=False
+                ) or fallback_outcome
+                outcome = replace(
+                    current_outcome,
+                    validation_outcome=validation.outcome.value,
+                    parsed_payload=validation.parsed_payload,
+                    winning_json=validation.winning_json,
+                    compute_meta=validation.compute_meta,
+                    evaluations=validation.evaluations,
+                    error=(
+                        RuntimeError(validation.reason)
+                        if validation.reason
+                        else None
+                    ),
+                    is_no_new_execution=(
+                        current_outcome.is_no_new_execution
+                        if is_no_new_execution is None
+                        else is_no_new_execution
+                    ),
+                )
+                self._save_outcome(handle, outcome)
+                return outcome
+
     def execute_attempt(
         self,
         spec: AttemptSpec,
@@ -1169,23 +1212,12 @@ class AttemptGateway:
                             )
                         self.record_validation(spec.attempt_id, val_report)
                     if val_report is not None:
-                        resumed = replace(
+                        return self._finalize_validation_outcome(
+                            spec.attempt_id,
+                            val_report,
                             prep.outcome,
-                            validation_outcome=val_report.outcome.value,
-                            parsed_payload=val_report.parsed_payload,
-                            winning_json=val_report.winning_json,
-                            compute_meta=val_report.compute_meta,
-                            evaluations=val_report.evaluations,
-                            error=(
-                                RuntimeError(val_report.reason)
-                                if val_report.reason
-                                else None
-                            ),
                             is_no_new_execution=True,
                         )
-                        with self._lock:
-                            self._save_outcome(spec.attempt_id, resumed)
-                        return resumed
                 # Return retained result without new call or charge (§3, §8 A02)
                 if prep.outcome is not None:
                     return replace(prep.outcome, is_no_new_execution=True)
@@ -1293,46 +1325,20 @@ class AttemptGateway:
                 reason=f"VALIDATOR_EXCEPTION:{type(val_exc).__name__}:{val_exc}",
             )
 
-        validation_verdict = self.record_validation(spec.attempt_id, val_report)
-        if isinstance(
-            validation_verdict,
-            (RecordValidationDuplicate, RecordValidationConflict),
-        ):
-            retained_validation = self._load_validation(spec.attempt_id)
-            if retained_validation is not None:
-                val_report = retained_validation
-
-        # A concurrent reconciliation may settle or fault the attempt while
-        # validation runs. Protect the final read/merge/write across Store
-        # connections so this projection cannot overwrite that newer state.
-        with self._lock:
-            with self._store_transaction():
-                current_outcome = self._load_outcome(
-                    spec.attempt_id, allow_fallback=False
-                )
-                if current_outcome is None:
-                    current_outcome = AttemptOutcome(
-                        attempt_id=spec.attempt_id,
-                        execution_state=exec_state,
-                        accounting_status=acct_status,
-                        validation_outcome="UNKNOWN",
-                        confirmed_input=conf_in,
-                        confirmed_output=conf_out,
-                        held_tokens=held,
-                        raw_response=transport_report.raw_text,
-                    )
-                outcome = replace(
-                    current_outcome,
-                    validation_outcome=(
-                        val_report.outcome.value if val_report.outcome else "UNKNOWN"
-                    ),
-                    parsed_payload=val_report.parsed_payload,
-                    winning_json=val_report.winning_json,
-                    compute_meta=val_report.compute_meta,
-                    evaluations=val_report.evaluations,
-                    error=RuntimeError(val_report.reason) if val_report.reason else None,
-                    conflict=current_outcome.conflict or evidence_conflict,
-                )
-                self._save_outcome(spec.attempt_id, outcome)
-
-        return outcome
+        self.record_validation(spec.attempt_id, val_report)
+        fallback_outcome = AttemptOutcome(
+            attempt_id=spec.attempt_id,
+            execution_state=exec_state,
+            accounting_status=acct_status,
+            validation_outcome="UNKNOWN",
+            confirmed_input=conf_in,
+            confirmed_output=conf_out,
+            held_tokens=held,
+            raw_response=transport_report.raw_text,
+            conflict=evidence_conflict,
+        )
+        return self._finalize_validation_outcome(
+            spec.attempt_id,
+            val_report,
+            fallback_outcome,
+        )

@@ -727,6 +727,111 @@ def test_restart_after_evidence_resumes_validation_without_backend_call(store, b
     assert resumed.confirmed_input == 70
 
 
+def prepare_settled_without_validation(database, mode, bridge):
+    owner = make_owner(Store(database), "run_resumed_validation_race", bridge, mode=mode)
+    spec = make_spec(owner.run_id, "req_resumed_validation_race")
+    assert isinstance(owner.gateway.prepare(spec), PrepareReady)
+    grant = owner.gateway.claim_start(spec.attempt_id)
+    assert isinstance(grant, ClaimGranted)
+    assert grant.permit.consume()
+    owner.gateway.record_evidence(
+        spec.attempt_id,
+        attest(
+            owner.gateway,
+            TransportReport(
+                attempt_id=spec.attempt_id,
+                completion=True,
+                raw_text='{"kind":"WAIT"}',
+                usage=UsageReport("VerifiedFinal", 100, 10, "first-receipt"),
+            ),
+        ),
+    )
+    assert owner.gateway._load_outcome(spec.attempt_id).validation_outcome == "UNKNOWN"
+    return spec
+
+
+@pytest.mark.parametrize("mode", [LifecycleMode.SHADOW, LifecycleMode.AUTHORITATIVE])
+def test_resumed_validation_retains_concurrently_committed_conflict(
+    tmp_path, bridge, mode
+):
+    database = tmp_path / "resumed_conflict.db"
+    spec = prepare_settled_without_validation(database, mode, bridge)
+    recovering = make_owner(Store(database), spec.run_id, bridge, mode=mode)
+
+    def validator(report):
+        reconciler = make_owner(Store(database), spec.run_id, bridge, mode=mode)
+        reconciler.gateway.record_evidence(
+            spec.attempt_id,
+            attest(
+                reconciler.gateway,
+                TransportReport(
+                    attempt_id=spec.attempt_id,
+                    completion=True,
+                    raw_text='{"kind":"WAIT"}',
+                    usage=UsageReport(
+                        "VerifiedFinal", 99, 10, "conflicting-receipt"
+                    ),
+                ),
+            ),
+        )
+        assert reconciler.active_fault == "CONFLICTING_USAGE_RECEIPT"
+        return ValidationReport(
+            ValidationOutcome.ACCEPTED, parsed_payload={"kind": "WAIT"}
+        )
+
+    outcome = recovering.gateway.execute_attempt(
+        spec,
+        lambda permit: pytest.fail("recovery must not invoke backend"),
+        validator,
+    )
+
+    assert outcome.is_no_new_execution
+    assert (outcome.confirmed_input, outcome.confirmed_output) == (100, 10)
+    assert outcome.conflict == "CONFLICTING_USAGE_RECEIPT"
+    persisted = recovering.store.get(
+        "verified_attempt_outcomes", f"{spec.run_id}:{spec.attempt_id}"
+    )
+    assert persisted["conflict"] == "CONFLICTING_USAGE_RECEIPT"
+
+
+@pytest.mark.parametrize("mode", [LifecycleMode.SHADOW, LifecycleMode.AUTHORITATIVE])
+def test_resumed_validation_respects_concurrent_canonical_winner(
+    tmp_path, bridge, mode
+):
+    database = tmp_path / "resumed_validation_winner.db"
+    spec = prepare_settled_without_validation(database, mode, bridge)
+    recovering = make_owner(Store(database), spec.run_id, bridge, mode=mode)
+
+    def validator(report):
+        other = make_owner(Store(database), spec.run_id, bridge, mode=mode)
+        other.gateway.record_validation(
+            spec.attempt_id,
+            ValidationReport(
+                ValidationOutcome.ACCEPTED, parsed_payload={"kind": "WAIT"}
+            ),
+        )
+        raise RuntimeError("temporary validator failure in recovering worker")
+
+    outcome = recovering.gateway.execute_attempt(
+        spec,
+        lambda permit: pytest.fail("recovery must not invoke backend"),
+        validator,
+    )
+
+    canonical = recovering.store.get(
+        "verified_attempt_validations", f"{spec.run_id}:{spec.attempt_id}"
+    )
+    assert canonical["outcome"] == ValidationOutcome.ACCEPTED.value
+    assert outcome.is_no_new_execution
+    assert (outcome.confirmed_input, outcome.confirmed_output) == (100, 10)
+    assert outcome.validation_outcome == canonical["outcome"]
+    assert outcome.parsed_payload == canonical["parsed_payload"]
+    persisted = recovering.store.get(
+        "verified_attempt_outcomes", f"{spec.run_id}:{spec.attempt_id}"
+    )
+    assert persisted["validation_outcome"] == canonical["outcome"]
+
+
 # ==============================================================================
 # A13: Over-bound bill or verified late bill after release
 # Required assertion: Real expense and conflict retained; new starts disabled.
@@ -1414,7 +1519,7 @@ def test_final_projection_cannot_overwrite_concurrent_settlement(
         nonlocal direct_loads
         result = original_load(handle, allow_fallback=allow_fallback)
         caller = inspect.currentframe().f_back.f_code.co_name
-        if caller == "execute_attempt":
+        if caller in {"execute_attempt", "_finalize_validation_outcome"}:
             direct_loads += 1
             if direct_loads == 2:
                 reader_ready.set()
