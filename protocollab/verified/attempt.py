@@ -1155,6 +1155,7 @@ class AttemptGateway:
                         if is_no_new_execution is None
                         else is_no_new_execution
                     ),
+                    conflict=current_outcome.conflict or fallback_outcome.conflict,
                 )
                 self._save_outcome(handle, outcome)
                 return outcome

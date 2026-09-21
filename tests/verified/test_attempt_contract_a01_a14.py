@@ -338,6 +338,57 @@ def test_a06_response_started_followed_by_invalid_body(store, bridge, tmp_path):
     server.server_close()
 
 
+@pytest.mark.parametrize("mode", [LifecycleMode.SHADOW, LifecycleMode.AUTHORITATIVE])
+def test_a06_early_identity_conflict_survives_validation_finalization(
+    tmp_path, bridge, mode
+):
+    owner = make_owner(
+        Store(tmp_path / "early_identity_conflict.db"),
+        "run_a06_early_identity_conflict",
+        bridge,
+        mode=mode,
+    )
+    spec = make_spec(owner.run_id, "req_a06_early_identity_conflict")
+    calls = []
+
+    def wrong_attempt_transport(permit: OneShotPermit) -> TransportReport:
+        assert permit.consume() is True
+        calls.append(permit.attempt_id)
+        return TransportReport(
+            attempt_id="another-attempt",
+            completion=True,
+            raw_text='{"kind":"FINISH"}',
+            usage=UsageReport(
+                kind="VerifiedFinal",
+                input_tokens=100,
+                output_tokens=10,
+                receipt_ref="receipt-for-another-attempt",
+            ),
+        )
+
+    outcome = owner.gateway.execute_attempt(
+        spec,
+        wrong_attempt_transport,
+        lambda report: ValidationReport(
+            ValidationOutcome.ACCEPTED,
+            parsed_payload={"kind": "FINISH"},
+        ),
+    )
+
+    assert calls == [spec.attempt_id]
+    record = owner.get_request_record(spec.attempt_id)
+    assert record.charge.kind == ChargeKind.PENDING
+    assert record.charge.tokens == spec.declared_reservation_charge
+    assert (outcome.confirmed_input, outcome.confirmed_output) == (0, 0)
+    assert outcome.held_tokens == spec.declared_reservation_charge
+    assert outcome.conflict is not None
+    assert outcome.conflict.startswith("IDENTITY_MISMATCH")
+    persisted = owner.store.get(
+        "verified_attempt_outcomes", f"{owner.run_id}:{spec.attempt_id}"
+    )
+    assert persisted["conflict"] == outcome.conflict
+
+
 # ==============================================================================
 # A07: Confirmed 100/10 usage with invalid JSON, unclosed reasoning, or invalid scoring vector
 # Required assertion: 100/10 charged once; decision rejected; no false transport-failure accounting.
