@@ -34,19 +34,26 @@ def run_study(manifest, archive, split, output):
     for i, pair in enumerate(manifest.paired_interventions):
         point = manifest.intervention_points[i % len(manifest.intervention_points)]
         cases += [(f"{pair}-{'valid' if valid else 'invalid'}", pair, valid, point) for valid in (False, True)]
-    planned = {}
+    planned, planned_episodes = {}, []
     for scenario in archive["splits"][split]:
         for seed in manifest.decoding_seeds:
             for condition in manifest.conditions:
                 for governance in manifest.governance_conditions:
                     for name, pair, valid, point in cases:
+                        planned_episodes.append({"topology_id": scenario["topology_hash"],
+                            "scenario_id": scenario["scenario_id"], "seed": seed,
+                            "condition": condition, "governance_condition": governance,
+                            "case": name, "track": manifest.track, "query_regime": manifest.query_regime,
+                            "scenario_class": "clean" if pair is None else
+                                "valid_correction" if valid else "invalid_intervention"})
                         if pair:
                             case_id = digest([scenario["scenario_id"], seed, condition, governance, name])
                             planned[case_id] = {**pending_case(case_id, pair, valid, point),
                                 "case": name, "scenario_id": scenario["scenario_id"], "seed": seed,
                                 "condition": condition, "governance_condition": governance}
     plan = {"manifest_hash": digest(manifest), "archive_hash": digest(archive),
-            "split": split, "interventions": [dict(c) for c in planned.values()]}
+            "split": split, "episodes": planned_episodes,
+            "interventions": [dict(c) for c in planned.values()]}
     with (output / "study-plan.json").open("x") as stream:
         json.dump({"plan_hash": digest(plan), **plan}, stream, indent=2, sort_keys=True)
 
@@ -145,11 +152,16 @@ def run_study(manifest, archive, split, output):
                                     failures.append({"episode": str(path), "reason": "COVERAGE_SCORING_FAILED",
                                                      "message": str(audit_error)})
     summary = {"track": manifest.track, "split": split, "query_regime": manifest.query_regime,
-               "inference_unit": "protocol_topology", "episodes": len(rows), "failed_cases": failures,
+               "inference_unit": "protocol_topology", "episodes": len(rows),
+               "planned_episodes": len(planned_episodes),
+               "missing_episodes": len(planned_episodes) - len(rows), "failed_cases": failures,
                "constrained_partial_cases": constrained_cases,
                "plan_hash": digest(plan), "intervention_coverage": coverage_summary(list(planned.values())),
                "capability_differences": {governance: {
-                   category: paired_topology_bootstrap([r for r in rows if r["governance_condition"] == governance and r["scenario_class"] == category], "C2", "C0")
+                   category: paired_topology_bootstrap(
+                       [r for r in rows if r["governance_condition"] == governance and r["scenario_class"] == category],
+                       "C2", "C0", expected_rows=[r for r in planned_episodes
+                           if r["governance_condition"] == governance and r["scenario_class"] == category])
                    for category in ("clean", "valid_correction", "invalid_intervention")}
                    for governance in manifest.governance_conditions},
                "research_verdict": "NOT_ESTABLISHED"}

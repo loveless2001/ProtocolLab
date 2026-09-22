@@ -1,5 +1,91 @@
 # Engineering validation
 
+## Joint specification review (2026-09-22)
+
+Two agents reviewed the current implementation from `efd1b54`, reproduced three
+correctness defects, and repaired them locally. Findings, file ownership, peer
+reviews, and the eventual stopping decision are recorded in the
+[append-only coordination log](AGENT_COORDINATION_LOG.md).
+
+- **Receipt replay:** a duplicate not-sent receipt replaced a previously
+  rejected validation with `NOT_ATTEMPTED`. Both SHADOW and AUTHORITATIVE
+  regressions failed before the fix. Replay now preserves the durable validation,
+  error and conflict fields, derives accounting from the active request, and
+  returns the duplicate verdict.
+- **Cancellation versus invocation:** across separate SQLite connections,
+  cancellation could release a reservation while another owner retained a usable
+  permit; consumption was also invisible to the cancelling owner. All four
+  mode/order regressions failed before the fix. Permit consumption now commits a
+  local invocation record in the same transaction domain used by cancellation.
+  The tests also cover failed-write rollback, rejection inside an uncommitted
+  enclosing transaction, and owner reconstruction.
+  This record does not establish provider delivery or confirmed usage; the Bend
+  theorem scope is unchanged. See the [boundary note](bend-migration/TRUST_BOUNDARY.md#4-python-invocation-boundary-implementation-update-2026-09-22).
+- **Paired statistics:** unmatched seeds/tasks could produce a positive paired
+  confidence interval, and missing executions on both sides disappeared from the
+  comparison. Estimates now require complete matching cells against the retained
+  study plan. Incomplete pairs have explicit coverage counts and no estimate or
+  interval. The 13 new regressions include the actual study scheduler with
+  synthetic execution failures; these tests make no model calls. See the
+  [evaluation semantics](REVIEW-FIXES.md).
+
+The lifecycle acceptance regressions use the production SQLite Store and
+executable Bend in both modes. Older boundary tests now use the production Store
+in memory instead of a dictionary-only fixture; all 31 boundary tests passed
+after that change. The production requirement to commit permission before model
+work remains enforced.
+
+Combined-source validation passed **329 tests in 1173.85 seconds (19:33)**,
+with zero failures, errors or skips. The acceptance checker reports **42/42
+design IDs passing**. All 93 source/test/proof files match the SHA-256 manifest
+captured before this final run. Repository Ruff, the illustrative design fixture,
+schema export matching the checked-in contracts, and Bend `PROOF.bend`
+(`All terms check.`) also passed. Both agents independently reviewed the final
+evidence and explicitly agreed to stop this engineering pass on 2026-09-22; the
+agreement is retained in the coordination log and `peer-verification.json`.
+Changes remain local and uncommitted.
+
+The earlier baseline passed 308 tests in 1310.45 seconds; the final run adds
+13 paired-statistics cases and eight lifecycle cases. Stateful governance passed
+in both runs (8.12 seconds in the final run), so the earlier reported stall was
+not reproduced. Most final runtime was spent in the isolated study (527.78s),
+isolated learning setup (240.06s), and integrated learning/admission (207.73s).
+Diagnostic stack snapshots during these tests were not test failures.
+
+Local evidence is retained under `runs/spec-alignment-20260922/`: final results
+are `final-pytest.log`, `final-acceptance.junit.xml` and
+`final-acceptance-report.json`; the directory also contains failing reproductions,
+the paired before/after comparison, source manifest, completion audit and focused
+test evidence. Intermediate failures and resolutions remain in the coordination
+log. The final commands were:
+
+```bash
+.venv/bin/python -m pytest -vv -o faulthandler_timeout=120 --durations=15 \
+  --junitxml=runs/spec-alignment-20260922/final-acceptance.junit.xml
+.venv/bin/python scripts/check_acceptance.py \
+  runs/spec-alignment-20260922/final-acceptance.junit.xml \
+  --output runs/spec-alignment-20260922/final-acceptance-report.json
+```
+
+The suite ran with host namespace access required by the isolation and local
+loopback tests. These local results are not a claim of a new remote CI run.
+
+Tool versions are Python 3.12.3, Bend 2.0.16 and Bun 1.3.8. The Bend and Bun
+binary hashes match `toolchain.lock.json`; all five proof-manifest files match
+their recorded hashes and sizes. The installed `bend.ts` runtime differs from
+the locked source only by trailing spaces on comment lines 3 and 4. Its hash is
+therefore different despite unchanged executable text. Exact identities and the
+complete diff are retained in `toolchain-identities.json`,
+`toolchain-identity-assessment.json` and `toolchain-comment-diff.patch` in the
+same evidence directory. No runtime file was changed during validation.
+
+A read-only report at `2026-09-22T06:11:20Z` verified the existing Phase 2 store:
+280/280 lifecycle comparisons matched, with zero divergence, pending events or
+uncomparable records. Status remains `IN_PROGRESS`; the 14-day window cannot
+finish before `2026-10-04T05:07:37.042463Z`. These fixes and checks add engineering
+evidence. Research H1–H5, comparative model capability, and production promotion
+remain unestablished; no new model experiment or monitoring traffic was run.
+
 ## TypeSafe Jev structured-choice diagnostic (2026-09-20)
 
 A bounded API diagnostic exercised TypeSafe Jev through the closed

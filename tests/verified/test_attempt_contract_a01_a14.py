@@ -32,6 +32,8 @@ from protocollab.verified.attempt import (
     OneShotPermit,
     PrepareConflict,
     PrepareReady,
+    RecordEvidenceConflict,
+    RecordEvidenceDuplicate,
     TransportReport,
     UsageReport,
     ValidationOutcome,
@@ -490,6 +492,126 @@ def test_a09_genuine_not_sent_proof(store, bridge):
     summary = bridge.summarize(owner.bend_state)
     assert summary.total_spent == 0
     assert summary.total_held == 0
+
+
+@pytest.mark.parametrize("mode", [LifecycleMode.SHADOW, LifecycleMode.AUTHORITATIVE])
+def test_a09_duplicate_not_sent_preserves_validation_after_restart(store, bridge, mode):
+    owner = make_owner(store, "run_a09_duplicate", bridge, mode=mode)
+    spec = make_spec(owner.run_id, "req_a09_duplicate")
+
+    def transport(permit):
+        return TransportReport(
+            attempt_id=permit.attempt_id,
+            not_sent_proof_ref="cancelled_before_model_work",
+            error_ref="INPUT_UNAVAILABLE",
+        )
+
+    original = owner.gateway.execute_attempt(
+        spec,
+        transport,
+        lambda report: ValidationReport(
+            outcome=ValidationOutcome.REJECTED, reason=report.error_ref
+        ),
+    )
+    assert original.validation_outcome == "REJECTED"
+    retained_evidence = owner.gateway._load_evidence(spec.attempt_id)
+    assert retained_evidence is not None
+
+    # A reconstructed owner receives the same release receipt, then the caller
+    # replays the attempt. Neither operation may erase the canonical rejection.
+    restarted = make_owner(store, owner.run_id, bridge, mode=mode)
+    duplicate = restarted.gateway.record_evidence(
+        spec.attempt_id, attest(restarted.gateway, retained_evidence)
+    )
+    assert isinstance(duplicate, RecordEvidenceDuplicate)
+    replay = restarted.gateway.execute_attempt(
+        spec,
+        lambda permit: pytest.fail("released attempt must not invoke transport"),
+        lambda report: pytest.fail("canonical validation must not run again"),
+    )
+    assert replay.is_no_new_execution
+    assert replay.validation_outcome == "REJECTED"
+    assert str(replay.error) == "INPUT_UNAVAILABLE"
+    assert replay.execution_state == ExecutionState.NOT_SENT
+    assert replay.accounting_status == AccountingStatus.RELEASED
+    assert (replay.confirmed_input, replay.confirmed_output, replay.held_tokens) == (0, 0, 0)
+    persisted = store.get(
+        "verified_attempt_outcomes", f"{owner.run_id}:{spec.attempt_id}"
+    )
+    assert persisted["validation_outcome"] == "REJECTED"
+    store.verify()
+
+
+@pytest.mark.parametrize("mode", [LifecycleMode.SHADOW, LifecycleMode.AUTHORITATIVE])
+@pytest.mark.parametrize("consume_first", [False, True])
+def test_a09_not_sent_and_permit_consumption_serialize_across_owners(
+    store, bridge, mode, consume_first
+):
+    owner = make_owner(store, "run_a09_cancel", bridge, mode=mode)
+    spec = make_spec(owner.run_id, "req_a09_cancel")
+    assert isinstance(owner.gateway.prepare(spec), PrepareReady)
+    grant = owner.gateway.claim_start(spec.attempt_id)
+    assert isinstance(grant, ClaimGranted)
+
+    other_store = Store(store.path)
+    try:
+        other = make_owner(other_store, owner.run_id, bridge, mode=mode)
+        if consume_first:
+            assert grant.permit.consume()
+        release = other.gateway.record_evidence(
+            spec.attempt_id,
+            attest(other.gateway, TransportReport(
+                attempt_id=spec.attempt_id,
+                not_sent_proof_ref="cancelled_before_model_work",
+            )),
+        )
+        record = owner.get_request_record(spec.attempt_id)
+        if consume_first:
+            assert isinstance(release, RecordEvidenceConflict)
+            assert record.transport == TransportState.DISPATCHED_INTENT
+            assert record.charge.kind == ChargeKind.PENDING
+            assert record.charge.tokens == spec.declared_reservation_charge
+        else:
+            assert release.accounting_status == AccountingStatus.RELEASED
+            assert not grant.permit.consume(), "released reservation must revoke the live permit"
+            assert record.transport == TransportState.PROVEN_NOT_SENT
+        store.verify()
+    finally:
+        other_store.close()
+
+
+@pytest.mark.parametrize("mode", [LifecycleMode.SHADOW, LifecycleMode.AUTHORITATIVE])
+def test_a09_failed_consumption_commit_never_authorizes_work(store, bridge, mode, monkeypatch):
+    owner = make_owner(store, "run_a09_commit", bridge, mode=mode)
+    spec = make_spec(owner.run_id, "req_a09_commit")
+    assert isinstance(owner.gateway.prepare(spec), PrepareReady)
+    grant = owner.gateway.claim_start(spec.attempt_id)
+    assert isinstance(grant, ClaimGranted)
+    original_set = store.set
+
+    def fail_consumption_write(state_owner, *args, **kwargs):
+        result = original_set(state_owner, *args, **kwargs)
+        if state_owner == "verified_attempt_invocations":
+            raise RuntimeError("INJECTED_CONSUMPTION_COMMIT_FAILURE")
+        return result
+
+    monkeypatch.setattr(store, "set", fail_consumption_write)
+    with pytest.raises(RuntimeError, match="INJECTED_CONSUMPTION_COMMIT_FAILURE"):
+        grant.permit.consume()
+    assert not grant.permit.is_consumed
+    assert store.get("verified_attempt_invocations", f"{owner.run_id}:{spec.attempt_id}") is None
+    assert not any(e["kind"] == "verified.attempt_permit_consumed" for e in store.events())
+    monkeypatch.setattr(store, "set", original_set)
+
+    # STARTED stays conservative on recovery, regardless of whether model work
+    # began; neither the failed write nor a surrounding rollback grants I/O.
+    restarted = make_owner(store, owner.run_id, bridge, mode=mode)
+    assert isinstance(restarted.gateway.claim_start(spec.attempt_id), ClaimNoGrant)
+    with store.transaction():
+        with pytest.raises(RuntimeError, match="PERMIT_CONSUMPTION_REQUIRES_OWN_TRANSACTION"):
+            grant.permit.consume()
+    assert not grant.permit.is_consumed
+    store.verify()
 
 
 # ==============================================================================

@@ -110,9 +110,15 @@ class AttemptSpec:
 class OneShotPermit:
     """Unforgeable one-shot execution permit private to the execution gateway."""
 
-    def __init__(self, permit_id: str, attempt_id: str):
+    def __init__(
+        self,
+        permit_id: str,
+        attempt_id: str,
+        authorize_consumption: Callable[[], bool] | None = None,
+    ):
         self.permit_id = permit_id
         self.attempt_id = attempt_id
+        self._authorize_consumption = authorize_consumption
         self._consumed = False
         self._lock = threading.Lock()
 
@@ -120,6 +126,8 @@ class OneShotPermit:
         """Atomically consume the permit once."""
         with self._lock:
             if self._consumed:
+                return False
+            if self._authorize_consumption is not None and not self._authorize_consumption():
                 return False
             self._consumed = True
             return True
@@ -829,13 +837,47 @@ class AttemptGateway:
                 )
 
             # Issue the one-shot permit
+            permit_id = f"permit_{uuid.uuid4().hex}"
             permit = OneShotPermit(
-                permit_id=f"permit_{uuid.uuid4().hex[:12]}",
+                permit_id=permit_id,
                 attempt_id=handle,
+                authorize_consumption=lambda: self._consume_permit(handle, permit_id),
             )
             self._permits[handle] = permit
             self._execution_states[handle] = ExecutionState.STARTED
             return ClaimGranted(permit=permit)
+
+    def _consume_permit(self, handle: str, permit_id: str) -> bool:
+        """Serialize the invocation boundary with not-sent cancellation.
+
+        A permit can outlive another owner's release. Re-read the active request
+        and durably record consumption before the caller may start model work.
+        This is a local invocation boundary, not evidence of provider delivery.
+        """
+        with self._lock, self.owner.store.lock:
+            # Returning true from a nested transaction could authorize I/O before
+            # the consumption record commits, or after its enclosing rollback.
+            if self.owner.store._depth:
+                raise RuntimeError("PERMIT_CONSUMPTION_REQUIRES_OWN_TRANSACTION")
+            with self._store_transaction():
+                record = self.owner.get_request_record(handle)
+                if record is None or record.transport != TransportState.DISPATCHED_INTENT:
+                    return False
+                key = f"{self.owner.run_id}:{handle}"
+                if self.owner.store.get("verified_attempt_invocations", key) is not None:
+                    return False
+                self.owner.store.set(
+                    "verified_attempt_invocations",
+                    key,
+                    {
+                        "run_id": self.owner.run_id,
+                        "attempt_id": handle,
+                        "permit_id": permit_id,
+                        "boundary": "LOCAL_PERMIT_CONSUMED",
+                    },
+                    "verified.attempt_permit_consumed",
+                )
+            return True
 
     def trusted_evidence_adapter(self, source_ref: str) -> TrustedEvidenceAdapter:
         """Construct the adapter owned by a configured evidence integration."""
@@ -919,8 +961,11 @@ class AttemptGateway:
                     evidence_ref = self._persist_evidence(handle, report)
 
                     if report.not_sent_proof_ref is not None and not report.completion:
-                        permit = self._permits.get(handle)
-                        if permit is not None and permit.is_consumed:
+                        invocation = self.owner.store.get(
+                            "verified_attempt_invocations",
+                            f"{self.owner.run_id}:{handle}",
+                        )
+                        if invocation is not None:
                             return RecordEvidenceConflict(
                                 "NOT_SENT_PROOF_CONTRADICTS_CONSUMED_PERMIT"
                             )
@@ -943,16 +988,25 @@ class AttemptGateway:
                             )
                         if kind != "DuplicateNoop":
                             self._promote_evidence(handle, report)
-                        self._execution_states[handle] = ExecutionState.NOT_SENT
-                        outcome = AttemptOutcome(
-                            attempt_id=handle,
-                            execution_state=ExecutionState.NOT_SENT,
-                            accounting_status=AccountingStatus.RELEASED,
-                            validation_outcome=ValidationOutcome.NOT_ATTEMPTED.value,
+                        existing_out = self._load_outcome(
+                            handle, allow_fallback=False
                         )
+                        outcome = self._outcome_from_record(
+                            handle,
+                            self.owner.get_request_record(handle),
+                            existing_out,
+                        )
+                        if existing_out is None:
+                            outcome = replace(
+                                outcome,
+                                validation_outcome=ValidationOutcome.NOT_ATTEMPTED.value,
+                            )
+                        self._execution_states[handle] = outcome.execution_state
                         self._save_outcome(handle, outcome)
+                        if kind == "DuplicateNoop":
+                            return RecordEvidenceDuplicate(retained_ref=evidence_ref)
                         return RecordEvidenceRecorded(
-                            ExecutionState.NOT_SENT, AccountingStatus.RELEASED
+                            outcome.execution_state, outcome.accounting_status
                         )
 
                     if report.usage.kind == "VerifiedFinal":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import random
 from collections import defaultdict
 from statistics import mean
@@ -235,22 +236,80 @@ def score_interventions(events, actual_score):
     return rows
 
 
-def paired_topology_bootstrap(rows, treatment, control, metric="raw_goal_success", seed=0, samples=2000):
-    # Repeated tasks/seeds are averaged within topology first. No transition-level N.
-    grouped = defaultdict(lambda: defaultdict(list))
+def paired_topology_bootstrap(rows, treatment, control, metric="raw_goal_success", seed=0,
+                              samples=2000, expected_rows=None):
+    """Match task/seed observations before averaging and resampling topologies.
+
+    A planned inventory exposes even pairs for which both executions failed.
+    Missing observations or scores block inference, rather than selecting a
+    potentially biased complete-case subset. Ineligible task pairs are counted
+    separately and excluded together.
+    """
+    if treatment == control or samples < 1:
+        raise ValueError("INVALID_PAIRED_COMPARISON")
+    rows = list(rows)
+    context_fields = ("track", "governance_condition", "query_regime", "scenario_class")
+
+    def key(row):
+        return (row["topology_id"], row.get("seed"), row.get("case"),
+                *(row.get(field) for field in context_fields))
+
+    observations, expected, contexts = {}, set(), set()
     for row in rows:
         if row.get("inference_unit", "protocol_topology") != "protocol_topology":
             raise ValueError("PSEUDOREPLICATION_REJECTED")
-        if metric in ("raw_goal_success", "compliant_task_success") and not row.get("capability_eligible", True):
+        if row["condition"] not in (treatment, control):
             continue
-        if row["condition"] in (treatment, control) and row.get(metric) is not None:
-            grouped[row["topology_id"]][row["condition"]].append(float(row[metric]))
-    deltas = [mean(c[treatment]) - mean(c[control]) for c in grouped.values() if c[treatment] and c[control]]
+        identity = (key(row), row["condition"])
+        if identity in observations:
+            raise ValueError("DUPLICATE_PAIRED_OBSERVATION")
+        observations[identity] = row
+    for row in rows if expected_rows is None else expected_rows:
+        if row["condition"] in (treatment, control):
+            identity = (key(row), row["condition"])
+            if identity in expected:
+                raise ValueError("DUPLICATE_PLANNED_OBSERVATION")
+            expected.add(identity)
+            contexts.add(tuple(row.get(field) for field in context_fields))
+    if observations.keys() - expected:
+        raise ValueError("UNPLANNED_PAIRED_OBSERVATION")
+    if len(contexts) > 1:
+        raise ValueError("UNMATCHED_COMPARISON_CONTEXT")
+    grouped = defaultdict(list)
+    matched = incomplete = excluded = missing_observations = missing_metrics = 0
+    for pair in sorted({identity[0] for identity in expected}, key=repr):
+        pair_rows = [observations.get((pair, condition)) for condition in (treatment, control)]
+        absent = sum(row is None for row in pair_rows)
+        if absent:
+            missing_observations += absent
+            incomplete += 1
+            continue
+        if metric in ("raw_goal_success", "compliant_task_success") and any(
+                not row.get("capability_eligible", True) for row in pair_rows):
+            excluded += 1
+            continue
+        absent_metrics = sum(row.get(metric) is None for row in pair_rows)
+        if absent_metrics:
+            missing_metrics += absent_metrics
+            incomplete += 1
+            continue
+        values = [float(row[metric]) for row in pair_rows]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("NONFINITE_PAIRED_METRIC")
+        grouped[pair[0]].append(values[0] - values[1])
+        matched += 1
+    deltas = [mean(values) for values in grouped.values()]
+    coverage = {"inference_unit": "protocol_topology", "topology_n": len(deltas),
+                "matched_pair_n": matched, "incomplete_pair_n": incomplete,
+                "excluded_ineligible_pair_n": excluded,
+                "missing_observation_n": missing_observations, "missing_metric_n": missing_metrics}
+    if incomplete:
+        return {**coverage, "status": "INCOMPLETE_PAIRS", "interval": None}
     if len(deltas) < 2:
-        return {"status": "INSUFFICIENT_TOPOLOGY_CLUSTERS", "topology_n": len(deltas), "interval": None}
+        return {**coverage, "status": "INSUFFICIENT_TOPOLOGY_CLUSTERS", "interval": None}
     rng = random.Random(seed)
     boot = sorted(mean(rng.choices(deltas, k=len(deltas))) for _ in range(samples))
-    return {"status": "ESTIMATED", "inference_unit": "protocol_topology", "topology_n": len(deltas),
+    return {**coverage, "status": "ESTIMATED",
             "paired_mean_difference": mean(deltas),
             "interval": [boot[int(samples * .025)], boot[min(samples - 1, int(samples * .975))]],
             "confidence_level": .95, "bootstrap_seed": seed, "resamples": samples}

@@ -726,15 +726,15 @@
           </div>
         </div>
         <aside class="snapshot" aria-label="Status snapshot">
-          <span class="snapshot-label">Evidence snapshot · 21 Sep 2026</span>
+          <span class="snapshot-label">Evidence snapshot · 22 Sep 2026</span>
           <h2><span class="pulse" aria-hidden="true"></span>Phase 2 in progress</h2>
-          <p>280 of 280 persistent-store lifecycle comparisons match after the Day 1 traffic run. The required 14-day observation window is still open.</p>
+          <p>400 of 400 persistent-store lifecycle comparisons match after the Day 2 traffic run. The required 14-day observation window is still open.</p>
         </aside>
       </div>
     </div>
 
     <div class="metrics shell" aria-label="Project metrics">
-      <div class="metric"><span class="metric-value">290</span><span class="metric-label">full-suite tests passed at Phase 1 validation</span></div>
+      <div class="metric"><span class="metric-value">329</span><span class="metric-label">full-suite tests passed in the latest validation</span></div>
       <div class="metric"><span class="metric-value">14/14</span><span class="metric-label">lifecycle mutations caught by proof checks</span></div>
       <div class="metric"><span class="metric-value">52/52</span><span class="metric-label">Jev-run Python/Bend comparisons matched</span></div>
       <div class="metric"><span class="metric-value">0</span><span class="metric-label">research hypotheses claimed as confirmed</span></div>
@@ -800,7 +800,7 @@
             <h3>Verified lifecycle kernel</h3>
             <p>Bend 2.0.16 core, Python bridge, durable owner, proof checks, mutation analysis, restart and concurrency coverage merged to <code>main</code>.</p>
             <div class="evidence-row">
-              <div class="evidence-card"><strong>290</strong><span>tests passed</span></div>
+              <div class="evidence-card"><strong>329</strong><span>tests passed</span></div>
               <div class="evidence-card"><strong>14</strong><span>declared proof laws</span></div>
               <div class="evidence-card"><strong>14/14</strong><span>mutations caught</span></div>
             </div>
@@ -810,8 +810,8 @@
             <div class="status-top"><span class="status-step">PHASE 02</span><span class="badge dark">In progress</span></div>
             <h3>Persistent shadow observation</h3>
             <p>Started 20 September at 05:07 UTC. Earliest eligible completion: <strong>4 October 2026 at 05:07 UTC</strong>, provided coverage and integrity gates also pass.</p>
-            <div class="progress-bar" aria-label="21 hours and 24 minutes of the fourteen-day window elapsed; Day 1 traffic passed"><span style="width:6.4%"></span></div>
-            <p class="micro">21h 24m snapshot: 280 matches · 0 divergence · 0 pending · 0 uncomparable</p>
+            <div class="progress-bar" aria-label="49 hours and 55 minutes of the fourteen-day window elapsed; Day 2 traffic passed"><span style="width:14.9%"></span></div>
+            <p class="micro">2d 1h 55m snapshot: 400 matches · 0 divergence · 0 pending · 0 uncomparable</p>
           </article>
         </div>
 
@@ -947,17 +947,31 @@
           </div>
         </article>
 
+        <article class="daily-result" aria-label="Day 2 validation-rejection result">
+          <div>
+            <span class="badge">Day 2 · Pass</span>
+            <h3><code>validation-rejection</code> completed on the soak store.</h3>
+            <p>Deterministic loopback transport settled exact usage before validation rejected malformed JSON, unregistered candidates, and non-finite scores across all three enabled stages. This is lifecycle-agreement evidence, not a model-capability result.</p>
+          </div>
+          <div class="daily-result-grid">
+            <div><strong>30/30</strong><span>requests completed</span></div>
+            <div><strong>120/120</strong><span>new comparisons matched</span></div>
+            <div><strong>10 × 3</strong><span>rejection modes and stages</span></div>
+            <div><strong>0 / 0 / 0</strong><span>divergent / pending / uncomparable</span></div>
+          </div>
+        </article>
+
         <div class="traffic-layout">
           <aside class="today-card" aria-live="polite">
-            <span class="label" id="case-label">Day 1 result · Passed</span>
-            <h3 id="case-name">Normal success · passed</h3>
-            <p id="case-description">Completed 60 of 60 deterministic loopback requests with 240 of 240 new lifecycle comparisons matched.</p>
-            <div class="today-meta"><span id="case-batch">60/60 complete</span><span id="case-store">Soak store · retained</span></div>
+            <span class="label" id="case-label">Day 2 result · Passed</span>
+            <h3 id="case-name">Validation rejection · passed</h3>
+            <p id="case-description">Completed 30 of 30 deterministic requests with settled usage, rejected validation, and 120 of 120 new lifecycle comparisons matched.</p>
+            <div class="today-meta"><span id="case-batch">30/30 complete</span><span id="case-store">Soak store · retained</span></div>
           </aside>
 
           <div class="traffic-list" id="traffic-list">
-            <button class="traffic-item active" data-day="1" data-label="Day 1 result · Passed" data-name="Normal success · passed" data-description="Completed 60 of 60 deterministic loopback requests with 240 of 240 new lifecycle comparisons matched." data-batch="60/60 complete" data-store="Soak store · retained"><span class="traffic-day">D01</span><span class="traffic-copy"><strong>normal-success</strong><span>240/240 new matches · zero exceptions</span></span><span class="store-tag">Passed</span></button>
-            <button class="traffic-item" data-day="2" data-name="Validation rejection" data-description="Settle real transport usage, then reject a malformed or unregistered proposal without changing accounting." data-batch="30 requests" data-store="Soak store"><span class="traffic-day">D02</span><span class="traffic-copy"><strong>validation-rejection</strong><span>Rejected output after successful accounting</span></span><span class="store-tag">Soak</span></button>
+            <button class="traffic-item" data-day="1" data-label="Day 1 result · Passed" data-name="Normal success · passed" data-description="Completed 60 of 60 deterministic loopback requests with 240 of 240 new lifecycle comparisons matched." data-batch="60/60 complete" data-store="Soak store · retained"><span class="traffic-day">D01</span><span class="traffic-copy"><strong>normal-success</strong><span>240/240 new matches · zero exceptions</span></span><span class="store-tag">Passed</span></button>
+            <button class="traffic-item active" data-day="2" data-label="Day 2 result · Passed" data-name="Validation rejection · passed" data-description="Completed 30 of 30 deterministic requests with settled usage, rejected validation, and 120 of 120 new lifecycle comparisons matched." data-batch="30/30 complete" data-store="Soak store · retained"><span class="traffic-day">D02</span><span class="traffic-copy"><strong>validation-rejection</strong><span>120/120 new matches · zero exceptions</span></span><span class="store-tag">Passed</span></button>
             <button class="traffic-item" data-day="3" data-name="Exact duplicate" data-description="Replay identical lifecycle events and verify DuplicateNoop with unchanged totals." data-batch="25 request pairs" data-store="Soak store"><span class="traffic-day">D03</span><span class="traffic-copy"><strong>exact-duplicate</strong><span>Idempotency and stable totals</span></span><span class="store-tag">Soak</span></button>
             <button class="traffic-item" data-day="4" data-name="Normal success" data-description="Repeat the common path on a separate day to establish temporal coverage." data-batch="60 requests" data-store="Soak store"><span class="traffic-day">D04</span><span class="traffic-copy"><strong>normal-success</strong><span>Temporal repeat of common path</span></span><span class="store-tag">Soak</span></button>
             <button class="traffic-item" data-day="5" data-name="Concurrent batch" data-description="Overlap independent requests across stages and complete them out of reservation order." data-batch="64 requests · concurrency 4" data-store="Soak store"><span class="traffic-day">D05</span><span class="traffic-copy"><strong>concurrent-batch</strong><span>Isolation and out-of-order completion</span></span><span class="store-tag">Soak</span></button>
@@ -1013,7 +1027,7 @@
 
   <footer>
     <div class="shell footer-row">
-      <span><strong>ProtocolLab v0.1</strong> · evidence snapshot 21 September 2026</span>
+      <span><strong>ProtocolLab v0.1</strong> · evidence snapshot 22 September 2026</span>
       <span>Finite protocols · bounded authority · replayable evidence</span>
     </div>
   </footer>

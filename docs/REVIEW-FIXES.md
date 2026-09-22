@@ -179,3 +179,35 @@ owner journal and every blob, compares the exported public journal, replays
 live observations and reports freshly computed scores. Historical bundles may
 rescore differently under the corrected definitions; their recorded results
 remain preserved. None of these read-only commands dispatches world actions.
+
+## Paired capability estimates after incomplete execution (2026-09-22)
+
+The topology bootstrap previously averaged each condition independently within
+a topology. If executions failed on different seeds or tasks, it could report a
+positive paired gain with no matched episodes. For example, C2 successes on seed
+0 and C0 failures on seed 1 across two topologies produced a gain and interval
+of 1.0 despite having no seed/task pairs.
+
+Comparisons now match topology, decoding seed, and case before averaging each
+topology's paired differences. Track, governance condition, query regime, and
+scenario class must agree; incompatible contexts cannot be pooled. Duplicate,
+unplanned, or nonfinite observations are rejected. Repeated tasks and seeds
+remain within topology clusters, so additional episodes do not reweight a
+topology as additional independent evidence.
+
+The immutable study plan now includes every planned episode, alongside the
+intervention inventory. Reports retain planned and missing episode counts. A
+missing execution or metric yields `INCOMPLETE_PAIRS`, explicit coverage counts,
+and no confidence interval or gain estimate, including when both sides of a
+planned pair are absent. A capability-ineligible case excludes the entire pair
+and is counted separately; it cannot leave an unmatched eligible counterpart
+in the average. This is an explicit paired eligible-subset estimate, not an
+imputation of success or failure for excluded cases.
+
+Run `python -m pytest tests/test_paired_statistics.py` for the mismatched seed/task,
+double missing execution, eligibility, topology weighting, and study-plan
+regressions. The study regression uses synthetic episode/scorer fixtures with
+the actual scheduler and report writer; it makes no model calls. Historical
+reports remain unchanged and retain the definitions and source hashes recorded
+when they were produced. These changes protect evaluation integrity and provide
+no new capability evidence.

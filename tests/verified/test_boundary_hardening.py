@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from protocollab.actor.budget import DiagnosticBudgetAllocation, StageBudgetLimits
+from protocollab.storage import Store
 from protocollab.verified.lifecycle_owner import VerifiedLifecycleOwner
 from protocollab.verified.protocol import (
     MAX_SAFE_INT,
@@ -17,17 +18,17 @@ from protocollab.verified.protocol import (
 )
 
 
-class DummyStore:
-    def __init__(self):
-        self.records = []
-        self.data = {}
+class DummyStore(Store):
+    """Record writes while exercising the production transaction boundary."""
 
-    def get(self, table: str, key: str):
-        return self.data.get((table, key))
+    def __init__(self):
+        super().__init__(":memory:")
+        self.records = []
 
     def set(self, table: str, key: str, payload: Any, kind: str):
-        self.data[(table, key)] = payload
+        result = super().set(table, key, payload, kind)
         self.records.append((table, key, payload, kind))
+        return result
 
 
 class FaultyBridge:

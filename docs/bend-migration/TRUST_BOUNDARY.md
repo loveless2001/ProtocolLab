@@ -51,3 +51,25 @@ The following aspects remain strictly outside the mathematical proof and depend 
    `PASS` report under `SHADOW_MONITORING.md`. Process-log absence, a partial
    window, or a report with no observed lifecycle comparisons is not evidence of
    zero divergence.
+
+## 4. Python invocation boundary (implementation update, 2026-09-22)
+
+Gateway-issued permits recheck the active request when consumed. Consumption
+and a trusted not-sent release serialize through the same SQLite write
+transaction boundary, including across separate owners and database connections.
+If release commits first, the outstanding permit cannot be consumed. If
+consumption commits first, a not-sent report cannot refund that reservation.
+
+The `verified.attempt_permit_consumed` event and its
+`verified_attempt_invocations` projection record the local invocation boundary.
+They do not establish provider delivery or confirmed usage. The write commits
+before `consume()` returns permission to perform model work; a failed write or
+an enclosing uncommitted transaction cannot authorize that work. Recovery of
+`STARTED` still never creates a replacement permit. No database transaction spans
+model execution, and accounting continues to follow attributable receipts.
+
+Replaying a not-sent receipt returns `Duplicate` and preserves the retained
+validation, error and conflict fields while projecting accounting from the active
+request. Tests exercise both lifecycle modes, separate SQLite connections,
+both cancellation/consumption orders, failed writes, and owner reconstruction.
+These are Python integration guarantees; the Bend proof scope is unchanged.
