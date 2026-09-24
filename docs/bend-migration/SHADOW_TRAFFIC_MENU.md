@@ -18,7 +18,7 @@ never target the soak store.
 | `normal-success` | Successful requests with exact usage settlement and accepted validation, distributed across every enabled diagnostic stage | Soak store | 60 requests | Deterministic loopback or local | `Reserve`, `DispatchIntent`, `SettleUsage`, `ValidationRecorded` |
 | `validation-rejection` | Transport succeeds and usage settles, but the returned proposal is malformed, outside the candidate registry, or otherwise rejected | Soak store | 30 requests | Deterministic loopback | Successful accounting followed by rejected validation |
 | `budget-rejection` | Reservations exceed a stage or aggregate call/token limit and are rejected before dispatch | Soak store | 30 attempts | None | Rejected `Reserve`; zero dispatch and zero charge |
-| `exact-duplicate` | Replay identical reservation, dispatch, settlement, and validation events with the same request and receipt identities | Soak store | 25 request pairs | Deterministic loopback | Accepted first application and `DuplicateNoop` replay with unchanged totals |
+| `exact-duplicate` | Retry each completed attempt and its identical validation report through the gateway; replay the same reservation, dispatch, and settlement identities through the lifecycle owner | Soak store | 25 request pairs | Deterministic loopback | One provider call and charge per pair; `DuplicateNoop` for repeated reservation, dispatch, and settlement; gateway validation duplicate without a second lifecycle event |
 | `concurrent-batch` | Independent requests overlap across stages and complete in a different order from reservation order | Soak store | 64 requests, concurrency 4 | Deterministic loopback or local | Routing, isolation, settlement, and validation under concurrency |
 | `restart-recovery` | Stop after durable shadow enqueue, reopen the owner, drain the queue, then finish the requests | Soak store only when the injected stop point is known recoverable | 10 recoveries | Deterministic loopback | Durable pending queue, restart reconstruction, atomic drain, and final match |
 | `provider-boundary` | Small real transport sample using the currently supported local model port and, when explicitly selected, a paid API port | Soak store | 5 local plus at most 2 paid API requests | Local; paid API optional | Real serialization, timing, usage receipts, and response-boundary integration |
@@ -26,6 +26,19 @@ never target the soak store.
 | `timeout-unknown` | Time out after dispatch may have occurred; preserve the reservation instead of claiming conclusive failure | Isolated store | 10 requests | Fault-injection adapter | `TimeoutUnknown`, `OutcomeUnknown`, and retained charge hold |
 | `late-reconciliation` | Deliver a retained provider receipt after an earlier timeout and reconcile it exactly once | Isolated store | 10 timeout/receipt pairs | Fault-injection adapter | Unknown-to-settled transition, receipt binding, and duplicate suppression |
 | `conflict-quarantine` | Reuse a request identity or receipt with different immutable fields and verify fault latching and quarantine | Disposable isolated store | 5 conflicts | None | `ConflictFault`; no continued automated processing in the faulted run |
+
+For `exact-duplicate`, the gateway returns `RecordValidationDuplicate` for an
+identical retained validation report and does not emit another
+`ValidationRecorded` event. A direct call to the lifecycle owner's
+`record_validation` is a separate diagnostic: the Bend ledger does not retain
+validation history, so both Python and Bend return `Accepted` for that event
+again while leaving lifecycle state and accounting unchanged. If the runner
+includes this direct-owner diagnostic, record its extra shadow comparison
+separately from the gateway retry. For 25 pairs, each of `Reserve`,
+`DispatchIntent`, and `SettleUsage` should have 25 initial `Accepted` and 25
+replayed `DuplicateNoop` comparisons. The gateway validation retry creates no
+comparison; the optional direct-owner replay adds 25 `Accepted` validation
+comparisons to the 25 initial ones.
 
 ## Selection rules
 

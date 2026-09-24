@@ -598,6 +598,8 @@
     }
     .daily-result h3 { margin: 13px 0 7px; font-size: 1.35rem; letter-spacing: -.03em; }
     .daily-result p { margin: 0; color: var(--ink-soft); font-size: .83rem; }
+    .daily-result .daily-link { margin-top: 10px; }
+    .daily-result .daily-link a { color: var(--moss-dark); font-weight: 800; }
     .daily-result-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
     .daily-result-grid div { padding: 14px; background: rgba(251,250,245,.72); border: 1px solid rgba(46,112,93,.18); border-radius: 13px; }
     .daily-result-grid strong { display: block; font-size: 1.05rem; }
@@ -726,9 +728,9 @@
           </div>
         </div>
         <aside class="snapshot" aria-label="Status snapshot">
-          <span class="snapshot-label">Evidence snapshot · 22 Sep 2026</span>
+          <span class="snapshot-label">Evidence snapshot · 24 Sep 2026</span>
           <h2><span class="pulse" aria-hidden="true"></span>Phase 2 in progress</h2>
-          <p>400 of 400 persistent-store lifecycle comparisons match after the Day 2 traffic run. The required 14-day observation window is still open.</p>
+          <p>600 of 600 persistent-store lifecycle comparisons match after the Day 3 traffic run. The required 14-day observation window is still open.</p>
         </aside>
       </div>
     </div>
@@ -810,8 +812,8 @@
             <div class="status-top"><span class="status-step">PHASE 02</span><span class="badge dark">In progress</span></div>
             <h3>Persistent shadow observation</h3>
             <p>Started 20 September at 05:07 UTC. Earliest eligible completion: <strong>4 October 2026 at 05:07 UTC</strong>, provided coverage and integrity gates also pass.</p>
-            <div class="progress-bar" aria-label="49 hours and 55 minutes of the fourteen-day window elapsed; Day 2 traffic passed"><span style="width:14.9%"></span></div>
-            <p class="micro">2d 1h 55m snapshot: 400 matches · 0 divergence · 0 pending · 0 uncomparable</p>
+            <div class="progress-bar" aria-label="Four days and three hours of the fourteen-day window elapsed at the Day 3 snapshot"><span style="width:29.7%"></span></div>
+            <p class="micro">24 Sep snapshot: 600 matches · 0 divergence · 0 pending · 0 uncomparable</p>
           </article>
         </div>
 
@@ -961,18 +963,33 @@
           </div>
         </article>
 
+        <article class="daily-result" aria-label="Day 3 exact-duplicate result">
+          <div>
+            <span class="badge">Day 3 · Pass</span>
+            <h3><code>exact-duplicate</code> completed on the soak store.</h3>
+            <p>Each of 25 deterministic requests made one provider call. Exact reservation, dispatch, and settlement replays returned <code>DuplicateNoop</code>; gateway validation retries were deduplicated before another lifecycle event. A separate direct-owner validation replay returned <code>Accepted</code> with unchanged accounting. This is lifecycle-agreement evidence, not a model-capability result.</p>
+            <p class="daily-link"><a href="docs/bend-migration/DAY3_EXACT_DUPLICATE_RESULT.md">Read the Day 3 evidence summary ↗</a></p>
+          </div>
+          <div class="daily-result-grid">
+            <div><strong>25/25</strong><span>request pairs completed</span></div>
+            <div><strong>200/200</strong><span>new comparisons matched</span></div>
+            <div><strong>75 + 25</strong><span>lifecycle no-ops + gateway validation duplicates</span></div>
+            <div><strong>0 / 0 / 0</strong><span>divergent / pending / uncomparable</span></div>
+          </div>
+        </article>
+
         <div class="traffic-layout">
           <aside class="today-card" aria-live="polite">
-            <span class="label" id="case-label">Day 2 result · Passed</span>
-            <h3 id="case-name">Validation rejection · passed</h3>
-            <p id="case-description">Completed 30 of 30 deterministic requests with settled usage, rejected validation, and 120 of 120 new lifecycle comparisons matched.</p>
-            <div class="today-meta"><span id="case-batch">30/30 complete</span><span id="case-store">Soak store · retained</span></div>
+            <span class="label" id="case-label">Day 3 result · Passed</span>
+            <h3 id="case-name">Exact duplicate · passed</h3>
+            <p id="case-description">Completed 25 of 25 request pairs with 200 of 200 new lifecycle comparisons matched; validation retries were deduplicated at the gateway.</p>
+            <div class="today-meta"><span id="case-batch">25/25 pairs complete</span><span id="case-store">Soak store · retained</span></div>
           </aside>
 
           <div class="traffic-list" id="traffic-list">
             <button class="traffic-item" data-day="1" data-label="Day 1 result · Passed" data-name="Normal success · passed" data-description="Completed 60 of 60 deterministic loopback requests with 240 of 240 new lifecycle comparisons matched." data-batch="60/60 complete" data-store="Soak store · retained"><span class="traffic-day">D01</span><span class="traffic-copy"><strong>normal-success</strong><span>240/240 new matches · zero exceptions</span></span><span class="store-tag">Passed</span></button>
-            <button class="traffic-item active" data-day="2" data-label="Day 2 result · Passed" data-name="Validation rejection · passed" data-description="Completed 30 of 30 deterministic requests with settled usage, rejected validation, and 120 of 120 new lifecycle comparisons matched." data-batch="30/30 complete" data-store="Soak store · retained"><span class="traffic-day">D02</span><span class="traffic-copy"><strong>validation-rejection</strong><span>120/120 new matches · zero exceptions</span></span><span class="store-tag">Passed</span></button>
-            <button class="traffic-item" data-day="3" data-name="Exact duplicate" data-description="Replay identical lifecycle events and verify DuplicateNoop with unchanged totals." data-batch="25 request pairs" data-store="Soak store"><span class="traffic-day">D03</span><span class="traffic-copy"><strong>exact-duplicate</strong><span>Idempotency and stable totals</span></span><span class="store-tag">Soak</span></button>
+            <button class="traffic-item" data-day="2" data-label="Day 2 result · Passed" data-name="Validation rejection · passed" data-description="Completed 30 of 30 deterministic requests with settled usage, rejected validation, and 120 of 120 new lifecycle comparisons matched." data-batch="30/30 complete" data-store="Soak store · retained"><span class="traffic-day">D02</span><span class="traffic-copy"><strong>validation-rejection</strong><span>120/120 new matches · zero exceptions</span></span><span class="store-tag">Passed</span></button>
+            <button class="traffic-item active" data-day="3" data-label="Day 3 result · Passed" data-name="Exact duplicate · passed" data-description="Completed 25 of 25 request pairs with 200 of 200 new lifecycle comparisons matched; validation retries were deduplicated at the gateway." data-batch="25/25 pairs complete" data-store="Soak store · retained"><span class="traffic-day">D03</span><span class="traffic-copy"><strong>exact-duplicate</strong><span>200/200 new matches · one charge per pair</span></span><span class="store-tag">Passed</span></button>
             <button class="traffic-item" data-day="4" data-name="Normal success" data-description="Repeat the common path on a separate day to establish temporal coverage." data-batch="60 requests" data-store="Soak store"><span class="traffic-day">D04</span><span class="traffic-copy"><strong>normal-success</strong><span>Temporal repeat of common path</span></span><span class="store-tag">Soak</span></button>
             <button class="traffic-item" data-day="5" data-name="Concurrent batch" data-description="Overlap independent requests across stages and complete them out of reservation order." data-batch="64 requests · concurrency 4" data-store="Soak store"><span class="traffic-day">D05</span><span class="traffic-copy"><strong>concurrent-batch</strong><span>Isolation and out-of-order completion</span></span><span class="store-tag">Soak</span></button>
             <button class="traffic-item" data-day="6" data-name="Restart recovery" data-description="Stop after durable shadow enqueue, reopen the owner, drain the queue, and complete the requests." data-batch="10 recoveries" data-store="Controlled soak store"><span class="traffic-day">D06</span><span class="traffic-copy"><strong>restart-recovery</strong><span>Durability and reconstruction</span></span><span class="store-tag">Controlled</span></button>
@@ -1027,7 +1044,7 @@
 
   <footer>
     <div class="shell footer-row">
-      <span><strong>ProtocolLab v0.1</strong> · evidence snapshot 22 September 2026</span>
+      <span><strong>ProtocolLab v0.1</strong> · evidence snapshot 24 September 2026</span>
       <span>Finite protocols · bounded authority · replayable evidence</span>
     </div>
   </footer>
@@ -1075,11 +1092,6 @@
 
       items.forEach((item) => item.addEventListener('click', () => selectCase(item, true)));
 
-      const start = Date.UTC(2026, 8, 20);
-      const now = new Date();
-      const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-      const day = Math.floor((today - start) / 86400000) + 1;
-      if (day >= 1 && day <= 14) selectCase(items[day - 1]);
     })();
   </script>
 </body>
